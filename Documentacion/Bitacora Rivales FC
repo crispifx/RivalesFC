@@ -1,0 +1,147 @@
+Aquí tienes una versión **ampliada, técnica y detallada**, estructurada tipo informe de evolución de proyecto (*Devlog / Release Notes*), ideal para documentar el progreso del código:
+
+---
+
+# 📄 Informe de Evolución del Proyecto: *Rivales FC*
+
+---
+
+## 📌 MK 1: Versión Inicial (Alfa / Prototipo)
+
+### ⚙️ Funcionalidades implementadas
+
+* **Movimiento y física básica:** Control del jugador con desplazamientos y disparo directo al arco mediante simulación Box2D.
+* **Pantalla dividida (Split-Screen):** Cámara independiente para cada jugador en la misma ventana.
+* **Comportamiento del Arquero (Prototipo):** Inteligencia básica programada para reaccionar ante el movimiento de la pelota.
+
+### 🐛 Problemas detectados y limitaciones
+
+1. **Falta de menú y flujo de juego:** Al iniciar la aplicación se cargaba directamente el partido sin opciones de configuración, selección de modo o reinicio.
+2. **Cierre/Bloqueo por Gol:** Al detectar un gol, la simulación se rompía o cerraba el partido de manera abrupta.
+3. **Inversión y falencias en los sprites:**
+* Los jugadores se renderizaban cabeza abajo (dados vuelta).
+* Los sprites eran extremadamente planos (16×28 px), sin sombras ni detalles visuales.
+* La hinchada en las tribunas tenía la cabeza dibujada debajo del cuerpo.
+
+
+4. **Arquero "Imbatible":** El arquero leía la posición exacta de la pelota en cada *frame* sin ningún tipo de retraso físico o humano, bloqueando prácticamente el 100% de los tiros.
+5. **Estética general:** Césped uniforme sin textura, pelota de bajo contraste y público estático con errores visuales.
+
+---
+
+## 🚀 MK 2: Versión Mejorada y Funcionalidades Nuevas
+
+---
+
+### 🎨 1. Rediseño Gráfico y Corrección del Sistema de Renderizado
+
+* **Causa raíz del sprite invertido:** En `Pixmap` de LibGDX, el origen de coordenadas `y=0` se encuentra en la esquina superior izquierda (crece hacia abajo), a diferencia de las coordenadas del mundo en el resto del motor Box2D (donde `y` crece hacia arriba). El código original asignaba las coordenadas de los pies en un valor de `y` bajo pensando que era la base, provocando que los personajes quedaran boca abajo.
+
+
+* **Solución aplicada:**
+* **Inversión de coordenadas Y:** Ajuste en el algoritmo de dibujado en `PixelArtFactory`.
+
+
+* **Evolución visual:** Rediseño del tamaño de sprite de **16×28 px a 20×32 px**.
+
+
+* **Sombreado y Volumen:** Oscurecimiento estratégico de la mitad del cuerpo para dar tridimensionalidad, adición de ojos y contorno exterior oscuro para evitar que los jugadores se mimeticen con el pasto.
+
+
+* **Distinción visual del Arquero:** Creación de un kit exclusivo con guantes amarillos y camiseta negra.
+
+
+* **Mejoras contextuales:** Reorganización de la textura de la tribuna (`buildCrowdTexture`), incremento del tamaño y volumen de la pelota mediante sombreado, y adición de textura/ruido al césped para mayor detalle.
+
+
+
+
+
+---
+
+### 🛠️ 2. Estabilidad de la Simulación Física (Bug del Gol)
+
+* **Causa raíz del fallo:** Al ocurrir un gol, la función `registerGoal()` intentaba modificar y reposicionar cuerpos físicos (`setTransform`) directamente dentro del método `beginContact()`. `beginContact()` es un *callback* desencadenado por Box2D durante la ejecución interna de `world.step()`. Mutar la física en este punto viola el flujo de Box2D y corrompe la memoria/estado del mundo.
+
+
+* **Solución aplicada:**
+* Implementación de un patrón de diferimiento (*deferred action*).
+* `beginContact()` ahora solo activa una bandera booleana (`goalPending`).
+
+
+* La reubicación de jugadores, pelota y reinicio del marcador se procesa de forma segura en `fixedTick()`, **después** de que `world.step()` haya finalizado por completo.
+
+
+
+
+
+---
+
+### 🧤 3. Rebalanceo de Inteligencia y Física del Arquero
+
+* **Causa raíz:** El arquero consultaba y perseguía la posición exacta del balón en tiempo real, moviéndose a alta velocidad sin margen de imprecisión.
+* **Solución aplicada:**
+* **Tiempo de reacción humano:** Se añadió un delay en la toma de decisiones mediante interpolación con constante `GK_REACTION_TIME`.
+
+
+* **Ajuste de velocidad:** Se redujo la velocidad máxima de movimiento de **6.5 m/s a 4.2 m/s**.
+
+
+* **Margen de error:** Se amplió la tolerancia en la que el arquero considera que la pelota "ya está cubierta", permitiendo definir tiros a los palos o remates esquinados.
+
+
+
+
+
+---
+
+### 🏃‍♂️ 4. Nueva Mecánica Jugable: Barrida / Planchazo (`Slide Tackle`)
+
+* **Mapeo de Controles:** `Ctrl Izquierdo` (Jugador 1) / `Shift Derecho` (Jugador 2).
+* **Entrada de usuario (`PlayerInput`):** Se integró la variable `slidePressed` procesada como un evento de un solo cuadro (*single-frame trigger*).
+
+
+* **Máquina de Estados (`PlayerEntity`):**
+* Al activarse, captura la última dirección de movimiento registrada.
+* Impulsa al jugador a **9.5 m/s** (superando la velocidad de sprint habitual) durante un período fijo de **0.35 segundos** (`SLIDE_DURATION`).
+
+
+* El jugador pierde la capacidad de cambiar de dirección mientras dura la barrida.
+
+
+* Al concluir, se activa un tiempo de recarga de **1.0 segundo** (`SLIDE_COOLDOWN`).
+
+
+
+
+* **Interacción física y disputa de balón:** Si la barrida hace contacto con la pelota, `canWinBallThisSlide()` valida el choque y `MatchSimulation.handleSlideTackle()` le aplica un impulso direccional para "puntear" o ganar la pelota.
+
+
+* **Feedback Visual (`MatchScreen`):** El sprite del jugador rota automáticamente a **~62°** en la dirección del desplazamiento y genera una partícula/estela de polvo por detrás (`MotionTrail`).
+
+
+
+---
+
+### 🎮 5. Pantalla de Menú / Lobby e Integración de IA
+
+* **Modos de Juego (`GameMode`):** Definición del enum `ONE_PLAYER` y `TWO_PLAYERS`.
+
+
+* **Lobby Interactiva (`LobbyScreen`):**
+* Pantalla inicial desarrollada con `ShapeRenderer` y `BitmapFont` manteniendo la identidad pixel art del juego.
+
+
+* Permite navegar y seleccionar el modo de juego antes de instanciar la simulación.
+
+
+
+
+* **Inteligencia Artificial de Soporte (`SupportAI`):**
+* Diseñada para controlar al Jugador 2 cuando se selecciona el modo `ONE_PLAYER`.
+
+
+* En cada ciclo del juego genera un objeto `PlayerInput` equivalente al del teclado (persigue el balón, calcula vectores de tiro al arco rival e intenta barridas tácticas).
+
+
+* **Ventaja de diseño:** Se desacopló de la física del juego "enganchándose" directamente sobre el conector de entrada, evitando duplicar código de movimiento, disparo o barrida.
