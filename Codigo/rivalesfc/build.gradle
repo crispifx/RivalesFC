@@ -1,0 +1,47 @@
+// Rivales F.C. - build raiz (estilo gdx-setup / LibGDX 1.12.x)
+// Generar el resto del proyecto (wrapper de gradle, etc.) con el setup tool oficial de LibGDX
+// (https://libgdx.com/wiki/start/project-generation) eligiendo: Core + Desktop, extension Box2D.
+// Estos archivos .java se copian dentro de los módulos "core" y "desktop" ya generados.
+
+buildscript {
+    repositories {
+        mavenCentral()
+        google()
+        gradlePluginPortal()
+    }
+}
+
+allprojects {
+    apply plugin: "eclipse"
+
+    version = '1.0'
+    ext {
+        appName = "RivalesFC"
+        gdxVersion = '1.12.1'
+    }
+
+    repositories {
+        mavenCentral()
+        maven { url "https://s01.oss.sonatype.org" }
+    }
+}
+
+project(":core") {
+    apply plugin: "java-library"
+
+    dependencies {
+        api "com.badlogicgames.gdx:gdx:$gdxVersion"
+        api "com.badlogicgames.gdx:gdx-box2d:$gdxVersion"
+    }
+}
+
+project(":desktop") {
+    apply plugin: "java-library"
+
+    dependencies {
+        implementation project(":core")
+        api "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"
+        api "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
+        api "com.badlogicgames.gdx:gdx-box2d-platform:$gdxVersion:natives-desktop"
+    }
+}

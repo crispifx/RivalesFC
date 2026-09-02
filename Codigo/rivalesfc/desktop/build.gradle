@@ -1,0 +1,17 @@
+apply plugin: "application"
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+sourceSets.main.java.srcDirs = ["src/main/java"]
+sourceSets.main.resources.srcDirs = ["../assets"]
+
+application {
+    mainClass = "com.rivalesfc.game.desktop.DesktopLauncher"
+}
+
+tasks.named("run") {
+    workingDir = rootProject.file("assets")
+}

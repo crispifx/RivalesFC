@@ -1,0 +1,3 @@
+rootProject.name = 'rivales-fc'
+include 'core'
+include 'desktop'
