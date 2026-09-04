@@ -1,147 +1,119 @@
-Aquí tienes una versión **ampliada, técnica y detallada**, estructurada tipo informe de evolución de proyecto (*Devlog / Release Notes*), ideal para documentar el progreso del código:
+Informe de Evolución del Proyecto: Rivales FC
+MK1 — Versión Inicial / Prototipo
+Funcionalidades implementadas
+Movimiento básico de los jugadores y sistema de disparo utilizando Box2D.
+Implementación de pantalla dividida (split-screen), con una cámara independiente para cada jugador.
+Primer prototipo de comportamiento del arquero, basado en la posición de la pelota.
+Problemas detectados
+Durante esta etapa se identificaron varios problemas que limitaron la estabilidad y la experiencia de juego:
+Flujo de juego incompleto: el partido comenzaba directamente, sin menú, selección de modalidad ni opciones de reinicio.
+Problemas al producirse un gol: la simulación podía bloquearse o finalizar de forma inesperada.
+Problemas de renderizado: los jugadores aparecían invertidos y los sprites tenían poco nivel de detalle.
+Comportamiento del arquero: la reacción inmediata ante la posición de la pelota hacía que prácticamente todos los remates fueran bloqueados.
+Aspectos visuales: el césped, la pelota y el público presentaban un nivel de detalle reducido y algunos errores de representación.
+
+MK2 — Mejora de Jugabilidad, Estabilidad y Presentación
+1. Rediseño gráfico
+Se corrigió el problema de inversión de los sprites provocado por la diferencia entre el sistema de coordenadas utilizado por Pixmap y el sistema de coordenadas del mundo de Box2D.
+La solución se implementó en PixelArtFactory, invirtiendo correctamente las coordenadas verticales durante el proceso de renderizado.
+También se realizaron mejoras generales en los recursos gráficos:
+Los sprites de los jugadores pasaron de 16×28 px a 20×32 px.
+Se incorporó sombreado para generar mayor sensación de volumen.
+Se agregaron ojos y contornos oscuros para mejorar la separación de los personajes respecto del césped.
+Se creó un diseño específico para el arquero, con camiseta negra y guantes amarillos.
+Se mejoró la textura de las tribunas mediante buildCrowdTexture.
+Se aumentó el tamaño y contraste de la pelota.
+Se incorporó textura al césped para evitar una superficie completamente uniforme.
+2. Corrección del problema producido por los goles
+El problema estaba relacionado con la modificación de cuerpos físicos desde beginContact(), mientras Box2D se encontraba ejecutando world.step().
+Para solucionarlo se implementó un sistema de acciones diferidas:
+beginContact() únicamente establece la bandera goalPending.
+Las modificaciones de la simulación se realizan posteriormente desde fixedTick().
+Una vez finalizado world.step(), se reposicionan los jugadores y la pelota y se actualiza el estado del partido.
+Esto permitió evitar modificaciones del mundo físico durante la ejecución interna de Box2D y mejorar considerablemente la estabilidad de la simulación.
+3. Ajustes del arquero
+Se modificó el comportamiento del arquero para evitar que reaccionara de manera instantánea a la pelota.
+Los principales cambios fueron:
+Incorporación de un tiempo de reacción mediante GK_REACTION_TIME.
+Reducción de la velocidad máxima de 6.5 m/s a 4.2 m/s.
+Aumento del margen de tolerancia utilizado para determinar si la pelota está cubierta.
+Con estos cambios, los remates dirigidos hacia los extremos del arco tienen mayores posibilidades de superar al arquero.
+4. Nueva mecánica: barrida
+Se incorporó la mecánica de barrida (slide tackle).
+Controles
+Jugador 1: Ctrl izquierdo
+Jugador 2: Shift derecho
+La acción se gestiona mediante slidePressed como evento de activación de un solo cuadro.
+Al ejecutar una barrida:
+Se utiliza la última dirección de movimiento registrada.
+El jugador recibe una velocidad de 9.5 m/s.
+La duración es de 0.35 segundos, definida mediante SLIDE_DURATION.
+Durante la acción no es posible modificar la dirección.
+Una vez finalizada, se aplica un período de recuperación de 1 segundo, definido mediante SLIDE_COOLDOWN.
+Cuando la barrida entra en contacto con la pelota, canWinBallThisSlide() determina si corresponde disputar la posesión y MatchSimulation.handleSlideTackle() aplica el impulso correspondiente.
+También se incorporó feedback visual mediante la rotación del sprite y una estela de polvo (MotionTrail).
+5. Menú e inteligencia artificial
+Se incorporó una pantalla inicial (LobbyScreen) que permite seleccionar entre:
+ONE_PLAYER
+TWO_PLAYERS
+La interfaz se desarrolló utilizando ShapeRenderer y BitmapFont, manteniendo la estética general del juego.
+Para el modo de un jugador se implementó SupportAI, encargado de controlar al segundo jugador. La IA genera entradas mediante PlayerInput, utilizando el mismo sistema que los controles humanos.
+De esta manera, las acciones de movimiento, disparo y barrida mantienen una única implementación independientemente de si la entrada proviene del teclado o de la IA.
+
+MK3 — Audio, Feedback y Mejoras de Experiencia
+La MK3 se centró principalmente en mejorar la respuesta del juego ante las acciones del jugador y aportar mayor información durante y después del partido.
+1. Sistema de audio
+Se incorporó AudioFactory.java, encargado de generar los sonidos del juego en tiempo de ejecución.
+Los sonidos se sintetizan mediante ondas cuadradas y triangulares y se generan como archivos WAV, sin necesidad de incorporar archivos de audio externos.
+Se añadieron sonidos asociados a diferentes eventos:
+Pateo: sonido grave para pases suaves y agudo para remates fuertes.
+Barrida: sonido de impacto cuando la acción consigue recuperar la pelota.
+Silbato: utilizado al comenzar una jugada, después de un gol y al inicio del segundo tiempo.
+Gol: reproducción de una fanfarria.
+Final del partido: reproducción de un bocinazo.
+2. Screen Shake
+Se incorporó un efecto de movimiento de cámara para reforzar los impactos importantes del partido.
+El efecto se activa en:
+Remates con potencia superior a 0.75.
+Barridas que consiguen ganar la pelota.
+Goles, utilizando una intensidad mayor que en el resto de los casos.
+El efecto se aplica a las cámaras de los respectivos paneles del split-screen.
+3. Animación de movimiento
+Se mejoró la representación visual del desplazamiento de los jugadores y arqueros.
+Se incorporó un movimiento vertical (bobbing) acompañado por una deformación leve (squash), cuya intensidad y frecuencia dependen de la velocidad del personaje.
+Esto evita que los personajes se desplacen de forma completamente rígida por el campo y mejora la sensación de movimiento sin requerir una animación tradicional cuadro por cuadro.
+4. Indicador de posesión
+MatchSimulation comenzó a registrar qué equipo mantiene la pelota cerca durante cada ciclo de simulación.
+A partir de esta información se incorporó:
+Una barra de posesión azul y roja debajo del marcador.
+Porcentaje de posesión para cada equipo durante la pantalla final del partido.
+Esta información permite complementar el resultado del marcador con una estadística sobre el desarrollo del partido.
+5. Tutorial durante el partido
+Se incorporó un tutorial contextual durante el saque inicial.
+Mientras el marcador permanece en 0-0 y la jugada todavía no comenzó, se muestran los controles correspondientes a cada jugador.
+El objetivo es que las principales acciones puedan conocerse directamente desde el juego, sin necesidad de consultar documentación externa.
+
+Resumen de evolución
+Versión
+Objetivo
+Principales incorporaciones
+MK1
+Prototipo
+Física, movimiento, disparos, arquero y split-screen
+MK2
+Jugabilidad y estabilidad
+Rediseño gráfico, corrección de física, barrida, lobby e IA
+MK3
+Experiencia y feedback
+Audio, screen shake, animaciones, posesión y tutorial
+
+Estado actual
+Con la MK3, Rivales FC cuenta con una base jugable estable y un conjunto de sistemas que permiten desarrollar un partido completo de principio a fin.
+La evolución del proyecto se dio de forma progresiva: la MK1 estableció la base física y de control, la MK2 resolvió los principales problemas técnicos y agregó nuevas mecánicas, y la MK3 se enfocó en mejorar la respuesta audiovisual y la información disponible para el jugador.
+Las siguientes funcionalidades quedaron fuera del alcance de esta etapa:
+Estirada explícita del arquero.
+Pases de la IA de soporte.
+Pantalla de mejor jugador.
+Desenfoque mediante Shader/FrameBuffer.
+Estas mejoras quedan como posibles incorporaciones para una futura versión.
 
----
-
-# 📄 Informe de Evolución del Proyecto: *Rivales FC*
-
----
-
-## 📌 MK 1: Versión Inicial (Alfa / Prototipo)
-
-### ⚙️ Funcionalidades implementadas
-
-* **Movimiento y física básica:** Control del jugador con desplazamientos y disparo directo al arco mediante simulación Box2D.
-* **Pantalla dividida (Split-Screen):** Cámara independiente para cada jugador en la misma ventana.
-* **Comportamiento del Arquero (Prototipo):** Inteligencia básica programada para reaccionar ante el movimiento de la pelota.
-
-### 🐛 Problemas detectados y limitaciones
-
-1. **Falta de menú y flujo de juego:** Al iniciar la aplicación se cargaba directamente el partido sin opciones de configuración, selección de modo o reinicio.
-2. **Cierre/Bloqueo por Gol:** Al detectar un gol, la simulación se rompía o cerraba el partido de manera abrupta.
-3. **Inversión y falencias en los sprites:**
-* Los jugadores se renderizaban cabeza abajo (dados vuelta).
-* Los sprites eran extremadamente planos (16×28 px), sin sombras ni detalles visuales.
-* La hinchada en las tribunas tenía la cabeza dibujada debajo del cuerpo.
-
-
-4. **Arquero "Imbatible":** El arquero leía la posición exacta de la pelota en cada *frame* sin ningún tipo de retraso físico o humano, bloqueando prácticamente el 100% de los tiros.
-5. **Estética general:** Césped uniforme sin textura, pelota de bajo contraste y público estático con errores visuales.
-
----
-
-## 🚀 MK 2: Versión Mejorada y Funcionalidades Nuevas
-
----
-
-### 🎨 1. Rediseño Gráfico y Corrección del Sistema de Renderizado
-
-* **Causa raíz del sprite invertido:** En `Pixmap` de LibGDX, el origen de coordenadas `y=0` se encuentra en la esquina superior izquierda (crece hacia abajo), a diferencia de las coordenadas del mundo en el resto del motor Box2D (donde `y` crece hacia arriba). El código original asignaba las coordenadas de los pies en un valor de `y` bajo pensando que era la base, provocando que los personajes quedaran boca abajo.
-
-
-* **Solución aplicada:**
-* **Inversión de coordenadas Y:** Ajuste en el algoritmo de dibujado en `PixelArtFactory`.
-
-
-* **Evolución visual:** Rediseño del tamaño de sprite de **16×28 px a 20×32 px**.
-
-
-* **Sombreado y Volumen:** Oscurecimiento estratégico de la mitad del cuerpo para dar tridimensionalidad, adición de ojos y contorno exterior oscuro para evitar que los jugadores se mimeticen con el pasto.
-
-
-* **Distinción visual del Arquero:** Creación de un kit exclusivo con guantes amarillos y camiseta negra.
-
-
-* **Mejoras contextuales:** Reorganización de la textura de la tribuna (`buildCrowdTexture`), incremento del tamaño y volumen de la pelota mediante sombreado, y adición de textura/ruido al césped para mayor detalle.
-
-
-
-
-
----
-
-### 🛠️ 2. Estabilidad de la Simulación Física (Bug del Gol)
-
-* **Causa raíz del fallo:** Al ocurrir un gol, la función `registerGoal()` intentaba modificar y reposicionar cuerpos físicos (`setTransform`) directamente dentro del método `beginContact()`. `beginContact()` es un *callback* desencadenado por Box2D durante la ejecución interna de `world.step()`. Mutar la física en este punto viola el flujo de Box2D y corrompe la memoria/estado del mundo.
-
-
-* **Solución aplicada:**
-* Implementación de un patrón de diferimiento (*deferred action*).
-* `beginContact()` ahora solo activa una bandera booleana (`goalPending`).
-
-
-* La reubicación de jugadores, pelota y reinicio del marcador se procesa de forma segura en `fixedTick()`, **después** de que `world.step()` haya finalizado por completo.
-
-
-
-
-
----
-
-### 🧤 3. Rebalanceo de Inteligencia y Física del Arquero
-
-* **Causa raíz:** El arquero consultaba y perseguía la posición exacta del balón en tiempo real, moviéndose a alta velocidad sin margen de imprecisión.
-* **Solución aplicada:**
-* **Tiempo de reacción humano:** Se añadió un delay en la toma de decisiones mediante interpolación con constante `GK_REACTION_TIME`.
-
-
-* **Ajuste de velocidad:** Se redujo la velocidad máxima de movimiento de **6.5 m/s a 4.2 m/s**.
-
-
-* **Margen de error:** Se amplió la tolerancia en la que el arquero considera que la pelota "ya está cubierta", permitiendo definir tiros a los palos o remates esquinados.
-
-
-
-
-
----
-
-### 🏃‍♂️ 4. Nueva Mecánica Jugable: Barrida / Planchazo (`Slide Tackle`)
-
-* **Mapeo de Controles:** `Ctrl Izquierdo` (Jugador 1) / `Shift Derecho` (Jugador 2).
-* **Entrada de usuario (`PlayerInput`):** Se integró la variable `slidePressed` procesada como un evento de un solo cuadro (*single-frame trigger*).
-
-
-* **Máquina de Estados (`PlayerEntity`):**
-* Al activarse, captura la última dirección de movimiento registrada.
-* Impulsa al jugador a **9.5 m/s** (superando la velocidad de sprint habitual) durante un período fijo de **0.35 segundos** (`SLIDE_DURATION`).
-
-
-* El jugador pierde la capacidad de cambiar de dirección mientras dura la barrida.
-
-
-* Al concluir, se activa un tiempo de recarga de **1.0 segundo** (`SLIDE_COOLDOWN`).
-
-
-
-
-* **Interacción física y disputa de balón:** Si la barrida hace contacto con la pelota, `canWinBallThisSlide()` valida el choque y `MatchSimulation.handleSlideTackle()` le aplica un impulso direccional para "puntear" o ganar la pelota.
-
-
-* **Feedback Visual (`MatchScreen`):** El sprite del jugador rota automáticamente a **~62°** en la dirección del desplazamiento y genera una partícula/estela de polvo por detrás (`MotionTrail`).
-
-
-
----
-
-### 🎮 5. Pantalla de Menú / Lobby e Integración de IA
-
-* **Modos de Juego (`GameMode`):** Definición del enum `ONE_PLAYER` y `TWO_PLAYERS`.
-
-
-* **Lobby Interactiva (`LobbyScreen`):**
-* Pantalla inicial desarrollada con `ShapeRenderer` y `BitmapFont` manteniendo la identidad pixel art del juego.
-
-
-* Permite navegar y seleccionar el modo de juego antes de instanciar la simulación.
-
-
-
-
-* **Inteligencia Artificial de Soporte (`SupportAI`):**
-* Diseñada para controlar al Jugador 2 cuando se selecciona el modo `ONE_PLAYER`.
-
-
-* En cada ciclo del juego genera un objeto `PlayerInput` equivalente al del teclado (persigue el balón, calcula vectores de tiro al arco rival e intenta barridas tácticas).
-
-
-* **Ventaja de diseño:** Se desacopló de la física del juego "enganchándose" directamente sobre el conector de entrada, evitando duplicar código de movimiento, disparo o barrida.
