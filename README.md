@@ -12,7 +12,7 @@
 
 Cada usuario controla a un futbolista dentro del campo de juego, mientras que el resto del plantel es comandado en tiempo real por un sistema de **Inteligencia Artificial de apoyo autoritativa basada en Máquinas de Estados Finitos (FSM)**.
 
-El propósito principal del proyecto es resolver la problemática técnica de la **sincronización de red sin servidor externo ni base de datos**, aplicando técnicas avanzadas de *netcode* sobre **Java 17** y el framework **LibGDX**.
+El propósito principal del proyecto es resolver la problemática técnica de la **sincronización de red sin servidor externo ni base de datos**, aplicando técnicas avanzadas de *netcode* sobre **Java** y el framework **LibGDX**.
 
 ---
 
@@ -67,70 +67,203 @@ com.rivalesfc
 └── ui
     ├── screens     # Menú, Lobby, Partido y Pantalla de Resultados
     └── hud         # Marcador, tiempo, barras de potencia e indicadores
+
 ```
 
 ---
 
 ## 🎮 Reglas y Funcionalidades del Juego
 
-- **Modalidad:** 2v2 o 1v1 (con adaptación automática ante desconexiones parciales).
-- **Control y Mecánicas:** Pases cortos/largos, remate cargado con barra de potencia, tiros con efecto, barridas tácticas y atajada de arquero.
-- **Reglamento:** Faltas, tarjetas amarillas/rojas (expulsión), offside automático y saques reglamentarios (córner, lateral, tiro libre).
-- **Repetición Instantánea:** Replay automático de 3 a 5 segundos generado localmente tras cada gol.
-- **Lobby y Chat:** Creación de salas personalizadas, selección de formaciones, colores de camiseta y chat de texto previo al partido.
+* **Modalidad:** 2v2 o 1v1 (con adaptación automática ante desconexiones parciales).
+* **Control y Mecánicas:** Pases cortos/largos, remate cargado con barra de potencia, tiros con efecto, barridas tácticas y atajada de arquero.
+* **Reglamento:** Faltas, tarjetas amarillas/rojas (expulsión), offside automático y saques reglamentarios (córner, lateral, tiro libre).
+* **Repetición Instantánea:** Replay automático de 3 a 5 segundos generado localmente tras cada gol.
+* **Lobby y Chat:** Creación de salas personalizadas, selección de formaciones, colores de camiseta y chat de texto previo al partido.
 
 ---
 
 ## 🛠️ Tecnologías e Herramientas
 
-- **Lenguaje Principal:** Java 17 (LTS)
-- **Framework Gráfico y Físico:** [LibGDX 1.12.x](https://libgdx.com/) (Scene2D + Box2D)
-- **Networking:** Java Native Net API (`java.net.*`) con `DataInputStream`/`DataOutputStream` para empaquetado binario ligero.
-- **Gestión de Proyecto:** Gradle / Git / GitHub.
-- **Simulación de Mala Red:** Clumsy (Windows) / `tc` / `netem` (Linux) para pruebas de estrés a 200ms de ping y 5% de packet loss.
+* **Lenguaje Principal:** Java (JDK 8 o superior / JDK 17 recomendado)
+* **Framework Gráfico y Físico:** [LibGDX 1.12.x](https://libgdx.com/) (Scene2D + Box2D)
+* **Networking:** Java Native Net API (`java.net.*`) con `DataInputStream`/`DataOutputStream` para empaquetado binario ligero.
+* **Gestión de Proyecto:** Gradle / Git / GitHub.
+* **Simulación de Mala Red:** Clumsy (Windows) / `tc` / `netem` (Linux) para pruebas de estrés a 200ms de ping y 5% de packet loss.
+
+---
+
+## ⚙️ Guía de Instalación, Compilación y Ejecución
+
+### 1. Requisitos Previos
+
+Para compilar y ejecutar el proyecto necesitas contar con:
+
+1. **Java Development Kit (JDK 8 o superior, JDK 17 recomendado)**
+2. **Gradle** *(si prefieres no utilizar el ejecutable Gradle Wrapper integrado)*
+
+#### 📌 Instalación de JDK y Gradle por Sistema Operativo
+
+* **Linux (Ubuntu / Debian / Linux Mint):**
+```bash
+sudo apt update
+sudo apt install openjdk-17-jdk gradle -y
+
+```
+
+
+* **macOS (usando Homebrew):**
+```bash
+brew install openjdk@17 gradle
+
+```
+
+
+* **Windows:**
+* **Opción A (PowerShell con Winget):**
+```powershell
+winget install EclipseAdoptium.Temurin.17.JDK
+winget install Gradle.Gradle
+
+```
+
+
+* **Opción B (Instalación Manual):**
+Descarga el instalador de **JDK 17** desde [Adoptium / Temurin](https://adoptium.net/) y **Gradle** desde [gradle.org/releases](https://gradle.org/releases/). Asegúrate de añadir sus rutas `bin` a la variable de entorno `PATH`.
+
+
+
+---
+
+### 2. Clonar el Repositorio
+
+Abre la terminal y clona el proyecto localmente:
+
+```bash
+git clone [https://github.com/tu-usuario/rivales-fc.git](https://github.com/tu-usuario/rivales-fc.git)
+cd rivales-fc/rivalesfc
+
+```
+
+---
+
+### 3. Compilación y Ejecución
+
+Puedes usar tanto el ejecutable `gradle` (instalado en tu sistema) como el wrapper `gradlew` incluido en la carpeta del proyecto.
+
+#### 🚀 Ejecutar el Juego (Desktop)
+
+* **Con Gradle instalado globalmente:**
+```bash
+gradle desktop:run
+
+```
+
+
+* **Con Gradle Wrapper (`gradlew`):**
+* *Linux / macOS:*
+```bash
+./gradlew desktop:run
+
+```
+
+
+* *Windows:*
+```cmd
+gradlew.bat desktop:run
+
+```
+
+
+
+
+
+---
+
+#### 📦 Compilar y Comprobar Errores
+
+Para verificar que todos los subproyectos (`core` y `desktop`) compilen correctamente:
+
+* **Con Gradle global:**
+```bash
+gradle build
+
+```
+
+
+* **Con Gradle Wrapper:**
+```bash
+./gradlew build
+
+```
+
+
+
+---
+
+#### 🛠️ Generar el Ejecutable `.JAR`
+
+Para empaquetar todo el proyecto en un ejecutable comprimido listo para distribución:
+
+* **Con Gradle global:**
+```bash
+gradle desktop:dist
+
+```
+
+
+* **Con Gradle Wrapper:**
+```bash
+./gradlew desktop:dist
+
+```
+
+
+
+El ejecutable se generará en la ruta:
+
+`desktop/build/libs/desktop-1.0.jar` (o nombre similar asignado por el build script).
+
+Para abrir el `.jar` en cualquier máquina con Java instalado:
+
+```bash
+java -jar desktop/build/libs/desktop-1.0.jar
+
+```
+
+---
+
+## 🎮 Cómo Jugar en Red (LAN)
+
+1. **Crear una Sala (Host):**
+* Un jugador selecciona **Crear Sala** e indica el puerto (por defecto `54555`).
+* El Host debe compartir su dirección IP de red local a los demás jugadores.
+
+
+2. **Unirse a la Sala (Clientes):**
+* Los demás jugadores seleccionan **Unirse**, ingresan la dirección IP del Host y confirman.
+
+
+3. **Inicio del Partido:**
+* Una vez listos en el Lobby, el Host inicia el partido.
+
+
 
 ---
 
 ## 👥 Integrantes del Equipo
 
-- **Alejo Angulo**
-- **Martín Belay**
-- **Tobías Miranda**
-- **Jeriel Estrada**
-- **Santino Crespo**
-
----
-
-## ⚙️ Guía de Instalación y Ejecución
-
-### Requisitos
-- **JDK 17** instalado y configurado en el PATH.
-- **Git** instalado.
-
-### Pasos
-
-1. **Clonar el repositorio:**
-   ```bash
-   git clone https://github.com/tu-usuario/rivales-fc.git
-   cd rivales-fc
-   ```
-
-2. **Ejecutar el proyecto con Gradle:**
-   - En **Windows**:
-     ```cmd
-     .\gradlew.bat desktop:run
-     ```
-   - En **Linux / macOS**:
-     ```bash
-     ./gradlew desktop:run
-     ```
-
-3. **Cómo Jugar en Red:**
-   - **Host:** Seleccionar *Crear Sala*, indicar puerto y pasar la IP a los demás.
-   - **Clientes:** Seleccionar *Unirse*, ingresar la IP del Host y confirmar en el Lobby.
+* **Alejo Angulo**
+* **Martín Belay**
+* **Tobías Miranda**
+* **Jeriel Estrada**
+* **Santino Crespo**
 
 ---
 
 ## ⚖️ Licencia y Créditos
 
-Proyecto desarrollado para la **Escuela Técnica N° 35 D.E. 18 "Ing. Eduardo Latzina"** (Buenos Aires, Argentina) como trabajo final integrador
+Proyecto desarrollado para la **Escuela Técnica N° 35 D.E. 18 "Ing. Eduardo Latzina"** (Buenos Aires, Argentina) como trabajo final integrador.
+
+```
+
+```
