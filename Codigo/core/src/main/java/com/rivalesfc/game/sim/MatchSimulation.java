@@ -81,6 +81,16 @@ public class MatchSimulation implements ContactListener {
     private boolean goalPending = false;
     private boolean pendingLeftTeamScored = false;
 
+    // --- Eventos "de un solo disparo" para que la capa de presentación (sonido,
+    // shake de cámara) reaccione sin acoplar la simulación a libGDX audio/gfx. ---
+    private Float pendingKickSfxPower = null;
+    private boolean pendingSlideTackleSfx = false;
+
+    // --- Posesión aproximada (para el resumen post-partido): ticks en los que
+    // cada equipo tuvo la pelota "controlada" (jugador de campo cerca de ella). ---
+    private int possessionTicksLeft = 0;
+    private int possessionTicksRight = 0;
+
     public MatchSimulation(GameMode mode) {
         this.mode = mode;
         this.playerRightAI = mode == GameMode.ONE_PLAYER ? new SupportAI(true) : null;
@@ -138,6 +148,12 @@ public class MatchSimulation implements ContactListener {
             // se la "gana" con un toque en la dirección del planchazo (una vez por planchazo).
             handleSlideTackle(playerLeft, ball);
             handleSlideTackle(playerRight, ball);
+
+            if (playerLeft.isNear(ball)) {
+                possessionTicksLeft++;
+            } else if (playerRight.isNear(ball)) {
+                possessionTicksRight++;
+            }
         } else {
             // Fuera de juego (cuenta regresiva / gol / entretiempo / final): todo congelado.
             playerLeft.body.setLinearVelocity(0, 0);
@@ -232,7 +248,9 @@ public class MatchSimulation implements ContactListener {
             if (toBall.len2() < 0.0001f) {
                 toBall.set(1f, 0f);
             }
-            ball.kick(toBall, player.getKickPower(), 0f);
+            float power = player.getKickPower();
+            ball.kick(toBall, power, 0f);
+            pendingKickSfxPower = power;
         }
         input.clearTransient();
     }
@@ -242,7 +260,31 @@ public class MatchSimulation implements ContactListener {
         if (player.canWinBallThisSlide() && player.isNear(ball)) {
             ball.kick(player.getSlideDirection(), Constants.SLIDE_KICK_POWER, 0f);
             player.markSlideBallTouched();
+            pendingSlideTackleSfx = true;
         }
+    }
+
+    /** Devuelve la potencia del último pateo (para sonido/juice) y limpia el evento. Null si no hubo ninguno este frame. */
+    public Float consumeKickSfxEvent() {
+        Float v = pendingKickSfxPower;
+        pendingKickSfxPower = null;
+        return v;
+    }
+
+    /** true si hubo un planchazo que "ganó" la pelota este frame (para sonido). Se consume una sola vez. */
+    public boolean consumeSlideTackleSfxEvent() {
+        boolean v = pendingSlideTackleSfx;
+        pendingSlideTackleSfx = false;
+        return v;
+    }
+
+    /** Porcentaje de posesión aproximado del equipo AZUL (0..100), útil para el resumen post-partido. */
+    public int getPossessionPercentLeft() {
+        int total = possessionTicksLeft + possessionTicksRight;
+        if (total == 0) {
+            return 50;
+        }
+        return Math.round(possessionTicksLeft * 100f / total);
     }
 
     public GameMode getMode() {

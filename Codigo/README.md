@@ -1,4 +1,29 @@
-# Rivales F.C. — Núcleo local, pantalla dividida, 2v2 fijo (Etapa 1 — versión mejorada)
+# Rivales F.C. — Núcleo local, pantalla dividida, 2v2 fijo (Etapa 1 — MK3)
+
+> **Novedades de la MK3** (sobre la MK2), pensadas puntualmente para que el
+> juego "se sienta" más profesional sin tocar el alcance de red/lobby de las
+> etapas siguientes:
+>
+> - **Audio sintetizado en runtime** (`audio/AudioFactory`): sin descargar ni
+>   empaquetar ningún archivo de sonido (mismo criterio que los sprites
+>   pixel-art: este entorno no tiene internet), se generan ondas
+>   cuadradas/triangulares a mano y se escriben como WAV temporal para poder
+>   reproducirlas con `Sound` de libGDX. Hay pitido de pateo (grave si es
+>   pase, agudo si es remate fuerte), golpe seco de planchazo, silbato de
+>   saque/entretiempo, fanfarria de gol y bocinazo de final de partido.
+> - **Screen shake**: la cámara de cada panel tiembla brevemente en remates
+>   fuertes, planchazos que ganan la pelota y, sobre todo, en los goles.
+> - **Animación de carrera sin sprites extra**: los personajes ahora suben y
+>   bajan levemente (bobbing) con un "squash" sutil al correr, con cadencia
+>   proporcional a su velocidad, en vez de deslizarse como un sprite rígido.
+> - **Indicador de posesión**: una barrita azul/roja bajo el marcador durante
+>   el partido, y el porcentaje de posesión de cada equipo en la pantalla de
+>   fin de partido.
+> - **Recordatorio de controles en pantalla**: durante el saque inicial del
+>   partido (0-0, primer tiempo) se muestra un cartel breve con las teclas de
+>   cada jugador, para no depender de que hayan leído el README antes de
+>   jugar.
+
 
 > **Novedades de esta versión** (mejora visual y de "feel" de partido sobre
 > la Etapa 1 original, sin tocar el alcance de red/lobby de las etapas
