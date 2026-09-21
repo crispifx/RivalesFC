@@ -4,10 +4,13 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.physics.box2d.Contact;
 import com.badlogic.gdx.physics.box2d.ContactImpulse;
 import com.badlogic.gdx.physics.box2d.ContactListener;
+import com.badlogic.gdx.physics.box2d.Body;
+import com.badlogic.gdx.physics.box2d.Fixture;
 import com.badlogic.gdx.physics.box2d.Manifold;
 import com.badlogic.gdx.physics.box2d.World;
 import com.rivalesfc.game.Constants;
 import com.rivalesfc.game.GameMode;
+import com.rivalesfc.game.Settings;
 import com.rivalesfc.game.ai.SupportAI;
 import com.rivalesfc.game.entities.Ball;
 import com.rivalesfc.game.entities.Field;
@@ -41,6 +44,8 @@ public class MatchSimulation implements ContactListener {
         PLAYING,
         /** Pelota y jugadores congelados mientras se muestra el cartel de gol. */
         GOAL_CELEBRATION,
+        /** MK4: repetición en cámara lenta de la jugada del gol (se puede saltear). */
+        REPLAY,
         /** Descanso entre el primer y el segundo tiempo. */
         HALFTIME,
         /** Partido terminado (se cumplieron los dos tiempos). */
@@ -71,7 +76,24 @@ public class MatchSimulation implements ContactListener {
     private Phase phase = Phase.KICKOFF;
     private float phaseTimer = Constants.KICKOFF_FREEZE_SECONDS;
     private int half = 1;
-    private float halfTimeRemaining = Constants.HALF_DURATION_SECONDS;
+    /** Duración de cada tiempo, tomada de {@link Settings} al crear el partido. */
+    private final float halfDuration = Settings.halfDurationSeconds();
+    private float halfTimeRemaining = halfDuration;
+
+    // --- MK4: estadísticas, atajadas y repetición ---
+    private final MatchStats stats = new MatchStats();
+    private int lastShotOnTargetTeam = -1;
+    private int lastShotTick = -1000;
+    private int pendingSaveTeam = -1;
+    private boolean pendingSaveSfx = false;
+    private boolean lastGoalByLeft = false;
+
+    private final int ringSize = (int) (Constants.REPLAY_SECONDS * Constants.SIM_HZ) + 1;
+    private final ReplayFrame[] ring = new ReplayFrame[ringSize];
+    private int ringHead = 0;
+    private int ringCount = 0;
+    private ReplayFrame[] replayFrames = null;
+    private float replayCursor = 0f;
 
     // Un gol se detecta dentro de beginContact(), que Box2D dispara EN MEDIO de
     // world.step(). Mover bodies (setTransform) ahí adentro es inseguro y puede
@@ -80,6 +102,16 @@ public class MatchSimulation implements ContactListener {
     // termina (ver fixedTick).
     private boolean goalPending = false;
     private boolean pendingLeftTeamScored = false;
+
+    // --- Eventos "de un solo disparo" para que la capa de presentación (sonido,
+    // shake de cámara) reaccione sin acoplar la simulación a libGDX audio/gfx. ---
+    private Float pendingKickSfxPower = null;
+    private boolean pendingSlideTackleSfx = false;
+
+    // --- Posesión aproximada (para el resumen post-partido): ticks en los que
+    // cada equipo tuvo la pelota "controlada" (jugador de campo cerca de ella). ---
+    private int possessionTicksLeft = 0;
+    private int possessionTicksRight = 0;
 
     public MatchSimulation(GameMode mode) {
         this.mode = mode;
@@ -99,6 +131,10 @@ public class MatchSimulation implements ContactListener {
         float patrolRange = Constants.GOAL_WIDTH / 2f - Constants.PLAYER_RADIUS;
         keeperLeft = new GoalkeeperEntity(world, -halfFieldWidth + Constants.GK_LINE_OFFSET, patrolRange, Constants.TEAM_LEFT_COLOR);
         keeperRight = new GoalkeeperEntity(world, halfFieldWidth - Constants.GK_LINE_OFFSET, patrolRange, Constants.TEAM_RIGHT_COLOR);
+
+        for (int i = 0; i < ring.length; i++) {
+            ring[i] = new ReplayFrame();
+        }
     }
 
     /**
@@ -118,26 +154,39 @@ public class MatchSimulation implements ContactListener {
         inputLeft.sequence = tick;
         inputRight.sequence = tick;
 
+        if (phase == Phase.REPLAY) {
+            stepReplay();
+            inputLeft.clearTransient();
+            inputRight.clearTransient();
+            return;
+        }
+
         boolean playEnabled = phase == Phase.PLAYING;
 
         if (playEnabled) {
             playerLeft.applyInput(inputLeft, Constants.SIM_STEP);
-            handleKick(playerLeft, inputLeft);
+            handleKick(playerLeft, inputLeft, 0);
 
             PlayerInput rightInput;
             if (mode == GameMode.ONE_PLAYER) {
-                playerRightAI.update(aiGeneratedInput, playerRight, ball, playerLeft, Constants.SIM_STEP);
+                playerRightAI.update(aiGeneratedInput, playerRight, ball, playerLeft, keeperLeft, Constants.SIM_STEP);
                 rightInput = aiGeneratedInput;
             } else {
                 rightInput = inputRight;
             }
             playerRight.applyInput(rightInput, Constants.SIM_STEP);
-            handleKick(playerRight, rightInput);
+            handleKick(playerRight, rightInput, 1);
 
             // Planchazo: si un jugador está en pleno planchazo y alcanza la pelota,
             // se la "gana" con un toque en la dirección del planchazo (una vez por planchazo).
-            handleSlideTackle(playerLeft, ball);
-            handleSlideTackle(playerRight, ball);
+            handleSlideTackle(playerLeft, ball, 0);
+            handleSlideTackle(playerRight, ball, 1);
+
+            if (playerLeft.isNear(ball)) {
+                possessionTicksLeft++;
+            } else if (playerRight.isNear(ball)) {
+                possessionTicksRight++;
+            }
         } else {
             // Fuera de juego (cuenta regresiva / gol / entretiempo / final): todo congelado.
             playerLeft.body.setLinearVelocity(0, 0);
@@ -148,19 +197,29 @@ public class MatchSimulation implements ContactListener {
             inputRight.clearTransient();
         }
 
-        // Arqueros 100% IA: único estado, perseguir la pelota en el eje Y. Se los deja
-        // activos incluso durante la cuenta regresiva para que no se vean "congelados a mitad de salto".
-        keeperLeft.update(ball.getPosition().y, Constants.SIM_STEP);
-        keeperRight.update(ball.getPosition().y, Constants.SIM_STEP);
+        // Arqueros 100% IA: siguen la pelota (y se tiran a los remates) solo con juego habilitado
+        // para estirarse; durante la cuenta regresiva solo la siguen.
+        keeperLeft.update(ball.getPosition(), ball.body.getLinearVelocity(), Constants.SIM_STEP, playEnabled);
+        keeperRight.update(ball.getPosition(), ball.body.getLinearVelocity(), Constants.SIM_STEP, playEnabled);
 
         world.step(Constants.SIM_STEP, 8, 3);
         tick++;
+
+        if (playEnabled) {
+            recordFrame();
+        }
 
         // El World ya terminó de resolver este paso: recién ahora es seguro
         // mover bodies (reset de posiciones) si se detectó un gol durante el step.
         if (goalPending) {
             goalPending = false;
+            pendingSaveTeam = -1;
             registerGoal(pendingLeftTeamScored);
+        } else if (pendingSaveTeam >= 0) {
+            stats.saves[pendingSaveTeam]++;
+            pendingSaveSfx = true;
+            lastShotOnTargetTeam = -1;
+            pendingSaveTeam = -1;
         }
 
         advancePhase(Constants.SIM_STEP);
@@ -198,14 +257,20 @@ public class MatchSimulation implements ContactListener {
 
         switch (phase) {
             case GOAL_CELEBRATION:
-                phase = Phase.KICKOFF;
-                phaseTimer = Constants.KICKOFF_FREEZE_SECONDS;
+                if (replayFrames != null && replayFrames.length >= 20) {
+                    phase = Phase.REPLAY;
+                    replayCursor = 0f;
+                    phaseTimer = replayFrames.length * Constants.SIM_STEP / Constants.REPLAY_SPEED;
+                } else {
+                    phase = Phase.KICKOFF;
+                    phaseTimer = Constants.KICKOFF_FREEZE_SECONDS;
+                }
                 break;
             case KICKOFF:
                 phase = Phase.PLAYING;
                 break;
             case HALFTIME:
-                halfTimeRemaining = Constants.HALF_DURATION_SECONDS;
+                halfTimeRemaining = halfDuration;
                 phase = Phase.KICKOFF;
                 phaseTimer = Constants.KICKOFF_FREEZE_SECONDS;
                 break;
@@ -222,27 +287,184 @@ public class MatchSimulation implements ContactListener {
         playerRight.body.setTransform(Constants.KICKOFF_RIGHT_X, 0, 0);
         playerRight.body.setLinearVelocity(0, 0);
 
+        playerLeft.resetState();
+        playerRight.resetState();
+
         keeperLeft.resetToCenter();
         keeperRight.resetToCenter();
+        ringCount = 0;
+        ringHead = 0;
     }
 
-    private void handleKick(PlayerEntity player, PlayerInput input) {
-        if (input.kickReleased && player.isNear(ball)) {
-            Vector2 toBall = new Vector2(ball.getPosition()).sub(player.getPosition());
-            if (toBall.len2() < 0.0001f) {
-                toBall.set(1f, 0f);
+    // ------------------------------------------------------------------
+    // Repetición de gol (MK4): se graba un anillo con los últimos segundos de
+    // juego y, tras el festejo, se reproduce en cámara lenta moviendo los mismos
+    // bodies (sin hacer world.step, así que la física no interviene).
+    // ------------------------------------------------------------------
+
+    private void recordFrame() {
+        ReplayFrame f = ring[ringHead];
+        f.ballX = ball.getPosition().x;
+        f.ballY = ball.getPosition().y;
+        f.ballAngle = ball.body.getAngle();
+        f.lx = playerLeft.getPosition().x;
+        f.ly = playerLeft.getPosition().y;
+        f.lvx = playerLeft.body.getLinearVelocity().x;
+        f.lvy = playerLeft.body.getLinearVelocity().y;
+        f.lSliding = playerLeft.isSliding();
+        f.rx = playerRight.getPosition().x;
+        f.ry = playerRight.getPosition().y;
+        f.rvx = playerRight.body.getLinearVelocity().x;
+        f.rvy = playerRight.body.getLinearVelocity().y;
+        f.rSliding = playerRight.isSliding();
+        f.kly = keeperLeft.getPosition().y;
+        f.klvy = keeperLeft.body.getLinearVelocity().y;
+        f.klDive = keeperLeft.getVisualDive();
+        f.kry = keeperRight.getPosition().y;
+        f.krvy = keeperRight.body.getLinearVelocity().y;
+        f.krDive = keeperRight.getVisualDive();
+        ringHead = (ringHead + 1) % ring.length;
+        ringCount = Math.min(ringCount + 1, ring.length);
+    }
+
+    /** Copia el anillo (en orden cronológico) a un arreglo de repetición. */
+    private void captureReplay() {
+        replayFrames = new ReplayFrame[ringCount];
+        int start = (ringHead - ringCount + ring.length) % ring.length;
+        for (int i = 0; i < ringCount; i++) {
+            ReplayFrame c = new ReplayFrame();
+            c.copyFrom(ring[(start + i) % ring.length]);
+            replayFrames[i] = c;
+        }
+    }
+
+    private void stepReplay() {
+        if (replayFrames != null && replayFrames.length > 0) {
+            int idx = Math.min((int) replayCursor, replayFrames.length - 1);
+            applyFrame(replayFrames[idx]);
+            replayCursor += Constants.REPLAY_SPEED;
+        }
+        phaseTimer -= Constants.SIM_STEP;
+        if (phaseTimer <= 0f) {
+            endReplay();
+        }
+    }
+
+    private void applyFrame(ReplayFrame f) {
+        ball.body.setTransform(f.ballX, f.ballY, f.ballAngle);
+        playerLeft.body.setTransform(f.lx, f.ly, 0);
+        playerLeft.body.setLinearVelocity(f.lvx, f.lvy);
+        playerLeft.setReplaySliding(f.lSliding);
+        playerRight.body.setTransform(f.rx, f.ry, 0);
+        playerRight.body.setLinearVelocity(f.rvx, f.rvy);
+        playerRight.setReplaySliding(f.rSliding);
+        keeperLeft.body.setTransform(keeperLeft.body.getPosition().x, f.kly, 0);
+        keeperLeft.body.setLinearVelocity(0, f.klvy);
+        keeperLeft.setReplayDive(f.klDive);
+        keeperRight.body.setTransform(keeperRight.body.getPosition().x, f.kry, 0);
+        keeperRight.body.setLinearVelocity(0, f.krvy);
+        keeperRight.setReplayDive(f.krDive);
+    }
+
+    private void endReplay() {
+        resetKickoffPositions();
+        replayFrames = null;
+        phase = Phase.KICKOFF;
+        phaseTimer = Constants.KICKOFF_FREEZE_SECONDS;
+    }
+
+    /** Saltea la repetición (el reinicio de posiciones lo hace el próximo tick). */
+    public void skipReplay() {
+        if (phase == Phase.REPLAY) {
+            phaseTimer = 0f;
+        }
+    }
+
+    private void handleKick(PlayerEntity player, PlayerInput input, int team) {
+        if (input.kickReleased) {
+            float power = player.consumeKickPower();
+            if (player.isNear(ball)) {
+                Vector2 toBall = new Vector2(ball.getPosition()).sub(player.getPosition());
+                if (toBall.len2() < 0.0001f) {
+                    toBall.set(team == 0 ? 1f : -1f, 0f);
+                }
+                ball.kick(toBall, power, 0f);
+                pendingKickSfxPower = power;
+                registerShot(team, toBall, power);
             }
-            ball.kick(toBall, player.getKickPower(), 0f);
         }
         input.clearTransient();
     }
 
+    /** Cuenta remates (potencia suficiente y rumbo al arco rival) y si van al arco (trayectoria recta). */
+    private void registerShot(int team, Vector2 rawDir, float power) {
+        if (power < Constants.SHOT_MIN_POWER) {
+            return;
+        }
+        float attack = team == 0 ? 1f : -1f;
+        Vector2 dir = new Vector2(rawDir).nor();
+        if (dir.x * attack < 0.15f) {
+            return;
+        }
+        stats.shots[team]++;
+        float goalLineX = attack * (Constants.FIELD_WIDTH / 2f);
+        Vector2 bp = ball.getPosition();
+        float t = (goalLineX - bp.x) / dir.x;
+        float yAtGoal = bp.y + dir.y * t;
+        if (Math.abs(yAtGoal) < Constants.GOAL_WIDTH / 2f) {
+            stats.shotsOnTarget[team]++;
+            lastShotOnTargetTeam = team;
+            lastShotTick = tick;
+        }
+    }
+
     /** Si el jugador está en pleno planchazo y alcanza la pelota, se la "gana" empujándola en esa dirección. */
-    private void handleSlideTackle(PlayerEntity player, Ball ball) {
+    private void handleSlideTackle(PlayerEntity player, Ball ball, int team) {
         if (player.canWinBallThisSlide() && player.isNear(ball)) {
             ball.kick(player.getSlideDirection(), Constants.SLIDE_KICK_POWER, 0f);
             player.markSlideBallTouched();
+            pendingSlideTackleSfx = true;
+            stats.tackles[team]++;
         }
+    }
+
+    /** Devuelve la potencia del último pateo (para sonido/juice) y limpia el evento. Null si no hubo ninguno este frame. */
+    public Float consumeKickSfxEvent() {
+        Float v = pendingKickSfxPower;
+        pendingKickSfxPower = null;
+        return v;
+    }
+
+    /** true si hubo un planchazo que "ganó" la pelota este frame (para sonido). Se consume una sola vez. */
+    public boolean consumeSlideTackleSfxEvent() {
+        boolean v = pendingSlideTackleSfx;
+        pendingSlideTackleSfx = false;
+        return v;
+    }
+
+    /** true si hubo una atajada del arquero este frame (para sonido/cartel). Se consume una sola vez. */
+    public boolean consumeSaveEvent() {
+        boolean v = pendingSaveSfx;
+        pendingSaveSfx = false;
+        return v;
+    }
+
+    public MatchStats getStats() {
+        return stats;
+    }
+
+    /** true si el último gol lo hizo el equipo AZUL (izquierda). */
+    public boolean isLastGoalByLeft() {
+        return lastGoalByLeft;
+    }
+
+    /** Porcentaje de posesión aproximado del equipo AZUL (0..100), útil para el resumen post-partido. */
+    public int getPossessionPercentLeft() {
+        int total = possessionTicksLeft + possessionTicksRight;
+        if (total == 0) {
+            return 50;
+        }
+        return Math.round(possessionTicksLeft * 100f / total);
     }
 
     public GameMode getMode() {
@@ -255,6 +477,17 @@ public class MatchSimulation implements ContactListener {
                 || contact.getFixtureB().getFilterData().categoryBits == Constants.CAT_BALL;
         if (!isBall) {
             return;
+        }
+
+        // Atajada: la pelota toca a un arquero cuando venía un remate al arco del equipo contrario.
+        if (phase == Phase.PLAYING && !goalPending) {
+            Body other = contact.getFixtureA().getFilterData().categoryBits == Constants.CAT_BALL
+                    ? contact.getFixtureB().getBody() : contact.getFixtureA().getBody();
+            int keeperTeam = other == keeperLeft.body ? 0 : (other == keeperRight.body ? 1 : -1);
+            if (keeperTeam >= 0 && lastShotOnTargetTeam == 1 - keeperTeam
+                    && tick - lastShotTick <= 4 * (int) Constants.SIM_HZ) {
+                pendingSaveTeam = keeperTeam;
+            }
         }
 
         if (goalPending || phase == Phase.GOAL_CELEBRATION) {
@@ -274,12 +507,15 @@ public class MatchSimulation implements ContactListener {
     private void registerGoal(boolean leftTeamScored) {
         if (leftTeamScored) {
             scoreLeft++;
-            lastGoalMessage = "GOL equipo AZUL";
+            lastGoalMessage = "GOL de " + Constants.PLAYER_LEFT_NAME + " (AZUL)";
         } else {
             scoreRight++;
-            lastGoalMessage = "GOL equipo ROJO";
+            lastGoalMessage = "GOL de " + Constants.PLAYER_RIGHT_NAME + " (ROJO)";
         }
+        lastGoalByLeft = leftTeamScored;
+        lastShotOnTargetTeam = -1;
 
+        captureReplay();   // antes de reposicionar: el anillo todavía tiene la jugada del gol
         resetKickoffPositions();
         phase = Phase.GOAL_CELEBRATION;
         phaseTimer = Constants.GOAL_CELEBRATION_SECONDS;
@@ -344,6 +580,14 @@ public class MatchSimulation implements ContactListener {
     /** Segundos restantes de la fase actual (cuenta regresiva de saque, gol, entretiempo). */
     public float getPhaseTimer() {
         return phaseTimer;
+    }
+
+    /** Progreso 0..1 de la repetición (para la barra). */
+    public float getReplayProgress() {
+        if (phase != Phase.REPLAY || replayFrames == null || replayFrames.length == 0) {
+            return 0f;
+        }
+        return Math.min(1f, replayCursor / replayFrames.length);
     }
 
     public int getHalf() {

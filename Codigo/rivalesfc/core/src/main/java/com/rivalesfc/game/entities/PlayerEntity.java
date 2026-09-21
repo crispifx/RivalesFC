@@ -101,7 +101,9 @@ public class PlayerEntity {
 
         if (input.kickHeld) {
             kickChargeTime = Math.min(Constants.KICK_CHARGE_TIME, kickChargeTime + dt);
-        } else {
+        } else if (!input.kickReleased) {
+            // MK4 (fix): en el tick del "soltar" la carga NO se borra acá; se consume en el pateo.
+            // Antes se ponía en 0 justo antes de leer la potencia, y todos los remates salían con potencia 0.
             kickChargeTime = 0f;
         }
 
@@ -136,6 +138,27 @@ public class PlayerEntity {
         } else if (slideCooldown > 0f) {
             slideCooldown -= dt;
         }
+    }
+
+    /** Devuelve la potencia acumulada (0..1) y reinicia la carga. Se llama al soltar el botón de pateo. */
+    public float consumeKickPower() {
+        float p = getKickPower();
+        kickChargeTime = 0f;
+        return p;
+    }
+
+    /** Limpia estados transitorios (planchazo, carga) al reposicionar para un saque. */
+    public void resetState() {
+        sliding = false;
+        slideTimer = 0f;
+        slideCooldown = 0f;
+        kickChargeTime = 0f;
+        slideBallTouched = false;
+    }
+
+    /** Solo para la repetición: fuerza el estado visual de planchazo. */
+    public void setReplaySliding(boolean value) {
+        sliding = value;
     }
 
     /** Potencia de pateo actual, en 0..1, según cuánto tiempo se sostuvo el botón. */

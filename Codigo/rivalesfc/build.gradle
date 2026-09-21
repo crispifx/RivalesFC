@@ -15,6 +15,11 @@ allprojects {
     apply plugin: "eclipse"
 
     version = '1.0'
+
+    // MK4: el código tiene tildes y ñ; sin esto, en Windows (cp1252) el compilador puede fallar o corromper textos.
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+    }
     ext {
         appName = "RivalesFC"
         gdxVersion = '1.12.1'

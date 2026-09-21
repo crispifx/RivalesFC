@@ -1,4 +1,53 @@
-# Rivales F.C. — Núcleo local, pantalla dividida, 2v2 fijo (Etapa 1 — versión mejorada)
+# Rivales F.C. — Núcleo local, pantalla dividida, 2v2 fijo (Etapa 1 — MK4)
+
+> ## Novedades de la MK4
+>
+> **Arreglos de errores heredados de la MK3** (afectaban al "feel" sin que se notara la causa):
+> - **La potencia de pateo siempre era 0.** `PlayerEntity.applyInput` ponía la carga en 0 en el mismo tick del "soltar", justo antes de que `handleKick` la leyera; todos los pateos salían como pase mínimo. Ahora la carga se consume al patear.
+> - **Se perdían pateos y planchazos.** El juego renderiza a 60 fps pero simula a 30 Hz; `pollInput` pisaba `kickReleased`/`slidePressed` en cada frame, así que si el evento caía en un frame sin tick, se perdía (~50 %). Ahora son "pegajosos" hasta que la simulación los usa.
+> - **Escala de la pelota.** Con `PASS_IMPULSE_MIN=3` y `SHOT_IMPULSE_MAX=16` sobre una pelota de ~0,076 kg, todo remate superaba el tope de velocidad de Box2D (~60 m/s): cargar más no cambiaba nada. Se reajustó a 1,1 / 2,9 (≈14 a ≈38 m/s), así la potencia realmente importa. *Son dos constantes en `Constants.java`, fáciles de tocar si prefieren otro ritmo.*
+> - `build.gradle` fuerza UTF-8 al compilar (el código tiene tildes y ñ).
+>
+> **Lo que la MK3 dejó fuera de alcance, ahora hecho:**
+> - **Estirada del arquero** (`GoalkeeperEntity`): estados TRACK / DIVE. Anticipa la trayectoria de un remate al arco, se tira tras un reflejo corto con error según la dificultad, tiene recarga y se anima (salto + estiramiento, sonido).
+> - **IA de soporte con pases y posicionamiento** (`SupportAI`): DEFEND / CHASE / CARRY, remata al rincón más lejano del arquero, hace toques a espacio libre (aclaración: en 2v2 fijo no hay compañero de campo, así que el "pase" es a espacio, no a un jugador), se acomoda detrás de la pelota para apuntar y defiende del lado del arco propio.
+> - **Pantalla de mejor jugador** (`MatchStats` + `drawFullTimePanel`): resultado, posesión, remates, remates al arco, recuperaciones, atajadas, notas 1–10 de los cuatro jugadores y MVP.
+> - **Desenfoque real por shader** (`gfx/BlurShader`): gaussiano 5x5 en GLSL aplicado al sprite del rival, sin FrameBuffer. Si el driver no compila el shader, se usa el desenfoque por capas de la MK3 como respaldo.
+>
+> **Novedades nuevas (rumbo a la versión final):**
+> - **Repetición de gol** en cámara lenta (0,6x, 3,5 s de jugada), con barras "cine", cartel REPLAY y cámara siguiendo la pelota. Se saltea con TAB. Es la funcionalidad de la sección 8.4 de la propuesta.
+> - **Atajadas** contadas, con cartel `¡ATAJADA!`, sonido y shake.
+> - **Opciones en el lobby**: dificultad (fácil/normal/difícil), duración del tiempo (1/2/3/5 min) y volumen, guardadas entre sesiones (`Settings`, con `Preferences` de libGDX).
+> - **Confeti** y ovación del público al hacer un gol; el cartel de gol nombra al goleador.
+> - Sonidos nuevos sintetizados: ovación, "fuuum" de la estirada, atajada. Tecla **M** para silenciar.
+> - Menú de pausa con las opciones disponibles.
+>
+> **Sigue fuera de alcance** (etapas 2 en adelante): red, lobby en red, formaciones, faltas/tarjetas/offside, tiro con efecto completo, pases a compañeros reales (requieren más de un jugador de campo por equipo).
+
+> **Novedades de la MK3** (sobre la MK2), pensadas puntualmente para que el
+> juego "se sienta" más profesional sin tocar el alcance de red/lobby de las
+> etapas siguientes:
+>
+> - **Audio sintetizado en runtime** (`audio/AudioFactory`): sin descargar ni
+>   empaquetar ningún archivo de sonido (mismo criterio que los sprites
+>   pixel-art: este entorno no tiene internet), se generan ondas
+>   cuadradas/triangulares a mano y se escriben como WAV temporal para poder
+>   reproducirlas con `Sound` de libGDX. Hay pitido de pateo (grave si es
+>   pase, agudo si es remate fuerte), golpe seco de planchazo, silbato de
+>   saque/entretiempo, fanfarria de gol y bocinazo de final de partido.
+> - **Screen shake**: la cámara de cada panel tiembla brevemente en remates
+>   fuertes, planchazos que ganan la pelota y, sobre todo, en los goles.
+> - **Animación de carrera sin sprites extra**: los personajes ahora suben y
+>   bajan levemente (bobbing) con un "squash" sutil al correr, con cadencia
+>   proporcional a su velocidad, en vez de deslizarse como un sprite rígido.
+> - **Indicador de posesión**: una barrita azul/roja bajo el marcador durante
+>   el partido, y el porcentaje de posesión de cada equipo en la pantalla de
+>   fin de partido.
+> - **Recordatorio de controles en pantalla**: durante el saque inicial del
+>   partido (0-0, primer tiempo) se muestra un cartel breve con las teclas de
+>   cada jugador, para no depender de que hayan leído el README antes de
+>   jugar.
+
 
 > **Novedades de esta versión** (mejora visual y de "feel" de partido sobre
 > la Etapa 1 original, sin tocar el alcance de red/lobby de las etapas
@@ -168,6 +217,9 @@ Para correrlo:
 | Ver bodies de Box2D (debug)  | F1    |
 | Pausar / reanudar            | P     |
 | Reiniciar el partido         | R     |
+| Saltear la repetición de gol | TAB   |
+| Silenciar / activar sonido   | M     |
+| Menú principal               | ESC   |
 
 Los arqueros no se controlan: se mueven solos, solo en vertical, siguiendo
 a la pelota.

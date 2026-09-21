@@ -61,8 +61,8 @@ public final class Constants {
 
     // --- Pase / remate (potencia variable, secc. 1.2) ---
     public static final float KICK_RANGE = 0.9f;          // distancia máxima jugador-pelota para patear
-    public static final float PASS_IMPULSE_MIN = 3f;
-    public static final float SHOT_IMPULSE_MAX = 16f;
+    public static final float PASS_IMPULSE_MIN = 1.1f;   // MK4: antes 3 (~39 m/s, ya pegado al tope de Box2D)
+    public static final float SHOT_IMPULSE_MAX = 2.9f;   // MK4: antes 16 (>200 m/s teóricos; Box2D lo recortaba a 60)
     public static final float KICK_CHARGE_TIME = 1.0f;     // segundos para cargar potencia máxima
 
     // --- Planchazo / barrida (nuevo) ---
@@ -70,7 +70,7 @@ public final class Constants {
     public static final float SLIDE_DURATION = 0.35f;      // segundos que dura el impulso del planchazo
     public static final float SLIDE_COOLDOWN = 1.0f;       // segundos de recarga antes de poder repetirlo
     public static final float SLIDE_RECOVERY_BRAKE = 0.35f; // frenado aplicado a la velocidad al terminar el planchazo
-    public static final float SLIDE_KICK_POWER = 0.5f;     // potencia (0..1) del toque que le da a la pelota si la alcanza
+    public static final float SLIDE_KICK_POWER = 0.35f;     // potencia (0..1) del toque que le da a la pelota si la alcanza
 
     // --- Arquero (100% IA, secc. 1.1 "arquero automático") ---
     // Único estado de IA: seguir la coordenada Y de la pelota, sin salir de la boca del arco.
@@ -78,6 +78,23 @@ public final class Constants {
     public static final float GK_LINE_OFFSET = 0.6f;  // distancia hacia adentro de la cancha desde el fondo
     public static final float GK_REACTION_TIME = 0.30f; // segundos de "reflejo" simulado antes de reaccionar al movimiento de la pelota
     public static final float GK_DEAD_ZONE = 0.15f;     // margen sin corregir, evita micro-ajustes robóticos
+
+
+    // --- MK4: estirada del arquero ---
+    public static final float GK_DIVE_SPEED = 9.0f;          // m/s durante la estirada
+    public static final float GK_DIVE_DURATION = 0.45f;      // segundos máximos de la estirada
+    public static final float GK_DIVE_COOLDOWN = 1.8f;       // recarga tras estirarse
+    public static final float GK_DIVE_REACTION = 0.10f;      // reflejo antes de tirarse (se escala por dificultad)
+    public static final float GK_DIVE_MIN_BALL_SPEED = 6f;   // velocidad mínima hacia el arco para considerar un remate
+    public static final float GK_DIVE_TRIGGER_DIST = 16f;    // distancia en X a la que empieza a evaluar
+    public static final float GK_DIVE_MIN_MISS = 0.7f;       // si la pelota ya pasa cerca, no hace falta tirarse
+
+    // --- MK4: repetición de gol ---
+    public static final float REPLAY_SECONDS = 3.5f;         // cuánto del juego previo al gol se repite
+    public static final float REPLAY_SPEED = 0.6f;           // 1 = tiempo real, <1 = cámara lenta
+
+    // --- MK4: goles / estadísticas ---
+    public static final float SHOT_MIN_POWER = 0.45f;        // potencia mínima para contar como remate
 
     // --- Equipos y saque (2v2 fijo: 1 humano + 1 arquero IA por equipo) ---
     public static final float KICKOFF_LEFT_X = -9f;
@@ -102,7 +119,7 @@ public final class Constants {
     // --- Tiempos de partido ---
     public static final float HALF_DURATION_SECONDS = 180f;   // 3:00 por tiempo
     public static final float KICKOFF_FREEZE_SECONDS = 3f;    // cuenta regresiva antes de jugar
-    public static final float GOAL_CELEBRATION_SECONDS = 2.5f;
+    public static final float GOAL_CELEBRATION_SECONDS = 2.0f;
     public static final float HALFTIME_BREAK_SECONDS = 4f;
 
     // --- Rastro de movimiento a alta velocidad (estética de la referencia) ---

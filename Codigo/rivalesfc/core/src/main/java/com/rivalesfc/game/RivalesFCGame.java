@@ -17,6 +17,7 @@ public class RivalesFCGame extends Game {
 
     @Override
     public void create() {
+        Settings.load();
         setScreen(new LobbyScreen(this));
     }
 }
