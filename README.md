@@ -1,5 +1,6 @@
 # Rivales F.C. ⚽🎮
 
+
 > **Proyecto Final de Laboratorio y Programación — 6° Año (División 6°2°)**  
 > **Escuela Técnica N° 35 D.E. 18 "Ing. Eduardo Latzina"**  
 > *Especialidad: Computación*
