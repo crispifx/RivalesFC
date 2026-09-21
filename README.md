@@ -1,6 +1,3 @@
-Aquí tienes el archivo `README.md` modificado. He actualizado la sección **"Guía de Instalación, Compilación y Ejecución"** para que el método principal y recomendado sea a través de **IntelliJ IDEA**, manteniendo las instrucciones para generar el `.JAR` final si lo necesitan.
-
-```markdown
 # Rivales F.C. ⚽🎮
 
 > **Proyecto Final de Laboratorio y Programación — 6° Año (División 6°2°)**  
