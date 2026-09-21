@@ -1,3 +1,6 @@
+Aquí tienes el archivo `README.md` modificado. He actualizado la sección **"Guía de Instalación, Compilación y Ejecución"** para que el método principal y recomendado sea a través de **IntelliJ IDEA**, manteniendo las instrucciones para generar el `.JAR` final si lo necesitan.
+
+```markdown
 # Rivales F.C. ⚽🎮
 
 > **Proyecto Final de Laboratorio y Programación — 6° Año (División 6°2°)**  
@@ -12,7 +15,7 @@
 
 Cada usuario controla a un futbolista dentro del campo de juego, mientras que el resto del plantel es comandado en tiempo real por un sistema de **Inteligencia Artificial de apoyo autoritativa basada en Máquinas de Estados Finitos (FSM)**.
 
-El propósito principal del proyecto es resolver la problemática técnica de la **sincronización de red sin servidor externo ni base de datos**, aplicando técnicas avanzadas de *netcode* sobre **Java 17** y el framework **LibGDX**.
+El propósito principal del proyecto es resolver la problemática técnica de la **sincronización de red sin servidor externo ni base de datos**, aplicando técnicas avanzadas de *netcode* sobre **Java** y el framework **LibGDX**.
 
 ---
 
@@ -67,70 +70,140 @@ com.rivalesfc
 └── ui
     ├── screens     # Menú, Lobby, Partido y Pantalla de Resultados
     └── hud         # Marcador, tiempo, barras de potencia e indicadores
+
 ```
 
 ---
 
 ## 🎮 Reglas y Funcionalidades del Juego
 
-- **Modalidad:** 2v2 o 1v1 (con adaptación automática ante desconexiones parciales).
-- **Control y Mecánicas:** Pases cortos/largos, remate cargado con barra de potencia, tiros con efecto, barridas tácticas y atajada de arquero.
-- **Reglamento:** Faltas, tarjetas amarillas/rojas (expulsión), offside automático y saques reglamentarios (córner, lateral, tiro libre).
-- **Repetición Instantánea:** Replay automático de 3 a 5 segundos generado localmente tras cada gol.
-- **Lobby y Chat:** Creación de salas personalizadas, selección de formaciones, colores de camiseta y chat de texto previo al partido.
+* **Modalidad:** 2v2 o 1v1 (con adaptación automática ante desconexiones parciales).
+* **Control y Mecánicas:** Pases cortos/largos, remate cargado con barra de potencia, tiros con efecto, barridas tácticas y atajada de arquero.
+* **Reglamento:** Faltas, tarjetas amarillas/rojas (expulsión), offside automático y saques reglamentarios (córner, lateral, tiro libre).
+* **Repetición Instantánea:** Replay automático de 3 a 5 segundos generado localmente tras cada gol.
+* **Lobby y Chat:** Creación de salas personalizadas, selección de formaciones, colores de camiseta y chat de texto previo al partido.
 
 ---
 
 ## 🛠️ Tecnologías e Herramientas
 
-- **Lenguaje Principal:** Java 17 (LTS)
-- **Framework Gráfico y Físico:** [LibGDX 1.12.x](https://libgdx.com/) (Scene2D + Box2D)
-- **Networking:** Java Native Net API (`java.net.*`) con `DataInputStream`/`DataOutputStream` para empaquetado binario ligero.
-- **Gestión de Proyecto:** Gradle / Git / GitHub.
-- **Simulación de Mala Red:** Clumsy (Windows) / `tc` / `netem` (Linux) para pruebas de estrés a 200ms de ping y 5% de packet loss.
+* **Lenguaje Principal:** Java (JDK 8 o superior / JDK 17 recomendado)
+* **Framework Gráfico y Físico:** [LibGDX 1.12.x](https://libgdx.com/?utm_source=gemini) (Scene2D + Box2D)
+* **Networking:** Java Native Net API (`java.net.*`) con `DataInputStream`/`DataOutputStream` para empaquetado binario ligero.
+* **Gestión de Proyecto:** Gradle / Git / GitHub.
+* **Simulación de Mala Red:** Clumsy (Windows) / `tc` / `netem` (Linux) para pruebas de estrés a 200ms de ping y 5% de packet loss.
+
+---
+
+## ⚙️ Guía de Instalación, Compilación y Ejecución
+
+La forma recomendada y más sencilla de compilar y ejecutar este proyecto de LibGDX es utilizando el entorno de desarrollo **IntelliJ IDEA**.
+
+### 1. Requisitos Previos
+
+1. **Java Development Kit (JDK 17 recomendado)**. Puedes descargarlo desde [Adoptium / Temurin](https://adoptium.net/?utm_source=gemini).
+2. **IntelliJ IDEA Community Edition** (gratuito) o Ultimate. Puedes descargarlo desde la [página oficial de JetBrains](https://www.jetbrains.com/idea/download/?utm_source=gemini).
+3. **Git** para clonar el repositorio.
+
+---
+
+### 2. Clonar el Repositorio
+
+Abre tu terminal y clona el proyecto localmente:
+
+```bash
+git clone [https://github.com/tu-usuario/rivales-fc.git](https://github.com/tu-usuario/rivales-fc.git)
+
+```
+
+---
+
+### 3. Ejecutar el Juego en IntelliJ IDEA
+
+1. **Abrir el proyecto:**
+* Inicia IntelliJ IDEA y selecciona la opción **Open**.
+* Navega hasta la carpeta clonada y selecciona el directorio `rivalesfc` (donde se encuentra el archivo `build.gradle`).
+* Haz clic en **OK** para abrirlo.
+
+
+2. **Sincronización de dependencias:**
+* Al abrir la carpeta, IntelliJ detectará automáticamente que es un proyecto gestionado con **Gradle**.
+* Espera unos minutos mientras el IDE descarga las dependencias de LibGDX y configura el entorno (verás una barra de carga en la parte inferior derecha).
+
+
+3. **Lanzar el juego:**
+* En el explorador de archivos lateral (Project), navega por la siguiente ruta:
+`desktop / src / main / java / com / rivalesfc / game / desktop /`
+* Haz clic derecho sobre el archivo **`DesktopLauncher.java`**.
+* Selecciona la opción **Run 'DesktopLauncher.main()'**.
+* ¡Listo! El proyecto se compilará y se abrirá la ventana del juego automáticamente.
+
+
+
+---
+
+### 4. Generar el Ejecutable `.JAR` (Opcional)
+
+Si deseas empaquetar todo el proyecto en un ejecutable comprimido listo para distribución, puedes utilizar el Gradle Wrapper (`gradlew`) incluido en la raíz del proyecto. Abre la terminal de IntelliJ o tu consola de comandos en la carpeta `rivalesfc` y ejecuta:
+
+* **En Windows (PowerShell/CMD):**
+```powershell
+.\gradlew.bat desktop:dist
+
+```
+
+
+* **En Linux / macOS:**
+```bash
+./gradlew desktop:dist
+
+```
+
+
+
+El ejecutable se generará en la ruta:
+`desktop/build/libs/desktop-1.0.jar` (o un nombre similar).
+
+Para abrir el `.jar` en cualquier máquina con Java instalado:
+
+```bash
+java -jar desktop/build/libs/desktop-1.0.jar
+
+```
+
+---
+
+## 🎮 Cómo Jugar en Red (LAN)
+
+1. **Crear una Sala (Host):**
+
+* Un jugador selecciona **Crear Sala** e indica el puerto (por defecto `54555`).
+* El Host debe compartir su dirección IP de red local a los demás jugadores.
+
+2. **Unirse a la Sala (Clientes):**
+
+* Los demás jugadores seleccionan **Unirse**, ingresan la dirección IP del Host y confirman.
+
+3. **Inicio del Partido:**
+
+* Una vez listos en el Lobby, el Host inicia el partido.
 
 ---
 
 ## 👥 Integrantes del Equipo
 
-- **Alejo Angulo**
-- **Martín Belay**
-- **Tobías Miranda**
-- **Jeriel Estrada**
-- **Santino Crespo**
-
----
-
-## ⚙️ Guía de Instalación y Ejecución
-
-### Requisitos
-- **JDK 17** instalado y configurado en el PATH.
-- **Git** instalado.
-
-### Pasos
-
-1. **Clonar el repositorio:**
-   ```bash
-   git clone https://github.com/tu-usuario/rivales-fc.git
-   cd rivales-fc
-   ```
-
-2. **Ejecutar el proyecto con Gradle:**
-   - En **Windows**:
-     ```cmd
-     .\gradlew.bat desktop:run
-     ```
-   - En **Linux / macOS**:
-     ```bash
-     ./gradlew desktop:run
-     ```
-
-3. **Cómo Jugar en Red:**
-   - **Host:** Seleccionar *Crear Sala*, indicar puerto y pasar la IP a los demás.
-   - **Clientes:** Seleccionar *Unirse*, ingresar la IP del Host y confirmar en el Lobby.
+* **Alejo Angulo**
+* **Martín Belay**
+* **Tobías Miranda**
+* **Jeriel Estrada**
+* **Santino Crespo**
 
 ---
 
 ## ⚖️ Licencia y Créditos
 
-Proyecto desarrollado para la **Escuela Técnica N° 35 D.E. 18 "Ing. Eduardo Latzina"** (Buenos Aires, Argentina) como trabajo final integrador
+Proyecto desarrollado para la **Escuela Técnica N° 35 D.E. 18 "Ing. Eduardo Latzina"** (Buenos Aires, Argentina) como trabajo final integrador.
+
+```
+
+```
