@@ -1,3 +1,65 @@
+# Rivales F.C. — MK5: online más suave, con ping y revancha
+
+> ## Balance de la MK5 (jugabilidad)
+>
+> **Barrida nerfeada** (todo en `Constants.java`):
+> | | Antes | Ahora |
+> |---|---|---|
+> | Velocidad (`SLIDE_SPEED`) | 9,5 m/s | 8,0 m/s |
+> | Duración (`SLIDE_DURATION`) | 0,35 s | 0,30 s (alcance total ~3,3 m → ~2,4 m) |
+> | Recarga (`SLIDE_COOLDOWN`) | 1,0 s | 1,8 s |
+> | Alcance a la pelota (`SLIDE_REACH`) | 0,9 m (el de pateo) | 0,8 m |
+> | Toque a la pelota (`SLIDE_KICK_POWER`) | 0,35 | 0,22 |
+> | Recuperación en el piso (`SLIDE_RECOVERY_TIME`) | — | 0,35 s sin moverse ni patear |
+>
+> Un planchazo errado ahora te deja vulnerable, y ya no es un botón para spamear.
+>
+> **Tiro buffeado:**
+> - Potencia máxima (`SHOT_IMPULSE_MAX`): 2,9 → 3,8 (~38 → ~50 m/s; el tope de Box2D es ~60).
+> - Carga más rápida (`KICK_CHARGE_TIME`): 1,0 s → 0,75 s.
+> - Alcance de pateo (`KICK_RANGE`): 0,9 → 1,05 m.
+> - **Se puede apuntar**: antes el remate salía siempre en línea recta jugador → pelota. Ahora la dirección se mezcla con hacia dónde te movés al soltar el botón (`AIM_ASSIST`); si te movés hacia atrás de la pelota, se ignora.
+> - Tirado en el piso (planchazo/recuperación) no se puede patear.
+>
+> Con tiros más fuertes los arqueros IA van a atajar menos: si queda desparejo, tocá `GK_SPEED`/`GK_DIVE_SPEED` en `Constants.java`.
+>
+> ## Novedades de la MK5 (sobre la MK4.5 con online 1v1)
+>
+> - **Interpolación de snapshots en el cliente** (`net/SnapshotInterpolator`). Antes el cliente aplicaba cada snapshot apenas llegaba: el host manda ~30/s y el cliente dibuja a 60 fps, así que todo se veía a saltos y el jitter de red lo empeoraba. Ahora se dibuja el estado de hace ~70 ms mezclando los dos snapshots que lo rodean. Los saltos grandes (saque tras un gol) no se interpolan; si el siguiente snapshot se retrasa, se extrapola hasta 100 ms con la velocidad. *Costo:* ~70 ms de retraso visual extra; se ajusta con `SnapshotInterpolator.DELAY_NANOS`.
+> - **Ping en pantalla** (esquina inferior izquierda, verde/amarillo/rojo). El cliente manda un `PING` por segundo, el host lo devuelve (`PONG`) y el cliente además le informa su ping al host, así que **los dos lo ven**.
+> - **Revancha online**: al terminar el partido el host presiona **R** y empieza uno nuevo sin cortar la conexión; el cliente ve "Esperando revancha del host".
+> - **Protocolo v2**: se agregaron `PING`/`PONG`. **Una MK4.5 y una MK5 no se conectan entre sí** (el cliente viejo dirá "no se pudo conectar"); ambos jugadores deben tener la MK5.
+> - `NetSelfTest` pasó de 17 a **26 pruebas** (ping medido, interpolación a mitad de camino, datos discretos, teletransporte, extrapolación, buffer circular).
+>
+> - **1 jugador a pantalla completa**: contra la IA ya no se divide la pantalla; ves toda la cancha en un solo panel (solo el modo 2 jugadores local sigue dividido). Como no hay un segundo humano al que distinguir, la IA se dibuja **nítida** (sin difuminado). El online mantiene el rival difuminado.
+> - **Cámara de pantalla completa**: muestra más cancha (`FULL_VIEW_HEIGHT = 20` m, antes 16) y se inclina 30 % hacia la pelota (`FULL_VIEW_BALL_BIAS`) para no perder la jugada. Aplica a 1 jugador y online; ambas son constantes en `Constants.java`.
+> - **Arreglo:** el recordatorio de controles del saque en online mostraba las teclas del Jugador 2 (flechas); online se juega con WASD, ahora muestra las correctas.
+> - Textos menores: el título del marcador pasó de "Local 2v2" a "Rivales F.C." y la descripción de "1 JUGADOR" en el lobby aclara que es pantalla completa.
+>
+> **Estado de la verificación (importante):** la capa de red y el interpolador son Java puro y se corrieron con `NetSelfTest` por loopback: **26/26 OK**. Los cambios en `MatchScreen` (interpolador, ping, tecla R de revancha, texto del panel final, pantalla completa en 1 jugador y la cámara nueva) **no se pudieron compilar** en el entorno donde se escribieron (sin LibGDX): son pocas líneas y se revisaron a mano, pero probalas en dos ventanas antes de darlas por buenas.
+>
+> **Sigue pendiente:** predicción del lado del cliente (con ping alto el jugador propio responde con retraso: ping + ~70 ms), lobby en red, formaciones y chat (Etapa 3); faltas, tarjetas, offside y tiro con efecto (Etapa 4); arte y sonido definitivos (Etapa 5).
+>
+> **Correr las pruebas de red sin LibGDX:**
+> ```
+> cd core/src
+> javac -encoding UTF-8 -d /tmp/out main/java/com/rivalesfc/game/net/*.java main/java/com/rivalesfc/game/input/PlayerInput.java test/java/com/rivalesfc/game/net/NetSelfTest.java
+> java -cp /tmp/out com.rivalesfc.game.net.NetSelfTest
+> ```
+
+# Rivales F.C. — Etapa 2: 1v1 online (UDP, host + cliente)
+
+**Cómo jugar online (misma red local, o con el puerto UDP 7777 abierto/redirigido en el router del host):**
+1. Jugador A (host): en el lobby elige **ONLINE: CREAR PARTIDA** y presiona ENTER. Ve su IP en pantalla y queda esperando. Es el equipo AZUL.
+2. Jugador B (cliente): elige **ONLINE: UNIRSE**, escribe la IP del host (opcionalmente `ip:puerto`) y presiona ENTER. Es el equipo ROJO.
+3. Ambos juegan con **WASD + Shift (sprint) + Espacio (cargar y patear) + Ctrl izq. (planchazo)**. Cada uno ve su propio panel a pantalla completa.
+
+**Cómo funciona:** el host corre toda la simulación (`MatchSimulation`, igual que en local) y usa el input del cliente para el jugador rojo. Manda un `Snapshot` ~30 veces por segundo; el cliente lo aplica (`applySnapshot`) y dibuja. El cliente **no** hace predicción: con latencia alta verá su movimiento con retraso.
+
+**Online no hay** pausa (P); el reinicio (R) solo lo tiene el host, y únicamente al terminar el partido (revancha). ESC vuelve al menú y cierra la conexión. Si el rival se cae, el host queda esperando y puede volver a entrar.
+
+**Estado de la verificación:** la capa de red (`net/`) tiene prueba automática por loopback (`NetSelfTest`, 26/26 en la MK5). La integración en `MatchScreen`/`MatchSimulation`/`LobbyScreen` **no se compiló ni se corrió** en el entorno donde se escribió (sin LibGDX): probarla en dos ventanas o dos máquinas antes de darla por buena.
+
 # Rivales F.C. — Núcleo local, pantalla dividida, 2v2 fijo (Etapa 1 — MK4)
 
 > ## Novedades de la MK4

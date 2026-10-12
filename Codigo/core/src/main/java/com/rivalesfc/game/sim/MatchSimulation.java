@@ -17,6 +17,7 @@ import com.rivalesfc.game.entities.Field;
 import com.rivalesfc.game.entities.GoalkeeperEntity;
 import com.rivalesfc.game.entities.PlayerEntity;
 import com.rivalesfc.game.input.PlayerInput;
+import com.rivalesfc.game.net.Snapshot;
 
 /**
  * Simulación del partido a tick fijo (30 Hz, secc. 2.3 de la propuesta).
@@ -108,6 +109,16 @@ public class MatchSimulation implements ContactListener {
     private Float pendingKickSfxPower = null;
     private boolean pendingSlideTackleSfx = false;
 
+    // --- Online: contadores acumulados de esos eventos (viajan en el Snapshot) y estado del lado cliente ---
+    private int kickEventCount = 0;
+    private int slideEventCount = 0;
+    private int saveEventCount = 0;
+    private float lastKickPower = 0f;
+    private boolean remoteInit = false;
+    private int remoteKickCount, remoteSlideCount, remoteSaveCount;
+    private int remotePossessionLeft = 50;
+    private float remoteReplayProgress = 0f;
+
     // --- Posesión aproximada (para el resumen post-partido): ticks en los que
     // cada equipo tuvo la pelota "controlada" (jugador de campo cerca de ella). ---
     private int possessionTicksLeft = 0;
@@ -125,7 +136,7 @@ public class MatchSimulation implements ContactListener {
 
         playerLeft = new PlayerEntity(world, new Vector2(Constants.KICKOFF_LEFT_X, 0), Constants.TEAM_LEFT_COLOR);
         playerRight = new PlayerEntity(world, new Vector2(Constants.KICKOFF_RIGHT_X, 0), Constants.TEAM_RIGHT_COLOR);
-        playerRight.humanControlled = mode == GameMode.TWO_PLAYERS;
+        playerRight.humanControlled = mode != GameMode.ONE_PLAYER;
 
         float halfFieldWidth = Constants.FIELD_WIDTH / 2f;
         float patrolRange = Constants.GOAL_WIDTH / 2f - Constants.PLAYER_RADIUS;
@@ -143,6 +154,9 @@ public class MatchSimulation implements ContactListener {
      * del framerate de renderizado (60 fps en el cliente, secc. 2.3).
      */
     public void step(float rawDelta, PlayerInput inputLeft, PlayerInput inputRight) {
+        if (mode == GameMode.ONLINE_CLIENT) {
+            return; // el cliente no simula: su estado llega por applySnapshot()
+        }
         accumulator += rawDelta;
         while (accumulator >= Constants.SIM_STEP) {
             fixedTick(inputLeft, inputRight);
@@ -218,6 +232,7 @@ public class MatchSimulation implements ContactListener {
         } else if (pendingSaveTeam >= 0) {
             stats.saves[pendingSaveTeam]++;
             pendingSaveSfx = true;
+            saveEventCount++;
             lastShotOnTargetTeam = -1;
             pendingSaveTeam = -1;
         }
@@ -383,13 +398,27 @@ public class MatchSimulation implements ContactListener {
     private void handleKick(PlayerEntity player, PlayerInput input, int team) {
         if (input.kickReleased) {
             float power = player.consumeKickPower();
-            if (player.isNear(ball)) {
+            // MK5: tirado en el piso (planchazo o recuperación) no se puede patear.
+            if (!player.isSliding() && !player.isRecovering() && player.isNear(ball)) {
                 Vector2 toBall = new Vector2(ball.getPosition()).sub(player.getPosition());
                 if (toBall.len2() < 0.0001f) {
                     toBall.set(team == 0 ? 1f : -1f, 0f);
                 }
+                // MK5: la dirección del remate se mezcla con hacia dónde te estás moviendo, así se puede apuntar
+                // (antes salía siempre en línea recta jugador -> pelota). Si te movés hacia atrás de la pelota
+                // (producto escalar <= 0) se ignora, para no patear al revés.
+                toBall.nor();
+                float mvLen = (float) Math.sqrt(input.moveX * input.moveX + input.moveY * input.moveY);
+                if (mvLen > 0.05f) {
+                    Vector2 mv = new Vector2(input.moveX, input.moveY).nor();
+                    if (mv.dot(toBall) > 0f) {
+                        toBall.add(mv.scl(Constants.AIM_ASSIST * Math.min(1f, mvLen))).nor();
+                    }
+                }
                 ball.kick(toBall, power, 0f);
                 pendingKickSfxPower = power;
+                kickEventCount++;
+                lastKickPower = power;
                 registerShot(team, toBall, power);
             }
         }
@@ -420,10 +449,11 @@ public class MatchSimulation implements ContactListener {
 
     /** Si el jugador está en pleno planchazo y alcanza la pelota, se la "gana" empujándola en esa dirección. */
     private void handleSlideTackle(PlayerEntity player, Ball ball, int team) {
-        if (player.canWinBallThisSlide() && player.isNear(ball)) {
+        if (player.canWinBallThisSlide() && player.isSlideReaching(ball)) {
             ball.kick(player.getSlideDirection(), Constants.SLIDE_KICK_POWER, 0f);
             player.markSlideBallTouched();
             pendingSlideTackleSfx = true;
+            slideEventCount++;
             stats.tackles[team]++;
         }
     }
@@ -460,6 +490,9 @@ public class MatchSimulation implements ContactListener {
 
     /** Porcentaje de posesión aproximado del equipo AZUL (0..100), útil para el resumen post-partido. */
     public int getPossessionPercentLeft() {
+        if (mode == GameMode.ONLINE_CLIENT) {
+            return remotePossessionLeft;
+        }
         int total = possessionTicksLeft + possessionTicksRight;
         if (total == 0) {
             return 50;
@@ -584,6 +617,9 @@ public class MatchSimulation implements ContactListener {
 
     /** Progreso 0..1 de la repetición (para la barra). */
     public float getReplayProgress() {
+        if (mode == GameMode.ONLINE_CLIENT) {
+            return remoteReplayProgress;
+        }
         if (phase != Phase.REPLAY || replayFrames == null || replayFrames.length == 0) {
             return 0f;
         }
@@ -597,6 +633,107 @@ public class MatchSimulation implements ContactListener {
     /** Segundos restantes del tiempo (primero o segundo) que se está jugando actualmente. */
     public float getHalfTimeRemaining() {
         return halfTimeRemaining;
+    }
+
+    public int getTick() {
+        return tick;
+    }
+
+    // ------------------------------------------------------------------
+    // Online (Etapa 2): el host genera snapshots; el cliente los aplica.
+    // ------------------------------------------------------------------
+
+    /** HOST: vuelca el estado actual del partido en {@code s}. */
+    public void fillSnapshot(Snapshot s) {
+        s.tick = tick;
+        s.phase = (byte) phase.ordinal();
+        s.half = (byte) half;
+        s.scoreLeft = (byte) Math.min(127, scoreLeft);
+        s.scoreRight = (byte) Math.min(127, scoreRight);
+        s.possessionLeft = (byte) getPossessionPercentLeft();
+        s.lastGoalByLeft = lastGoalByLeft;
+        s.halfTimeRemaining = halfTimeRemaining;
+        s.phaseTimer = phaseTimer;
+        s.replayProgress = getReplayProgress();
+
+        s.ballX = ball.getPosition().x;
+        s.ballY = ball.getPosition().y;
+        s.ballAngle = ball.body.getAngle();
+        s.ballVX = ball.body.getLinearVelocity().x;
+        s.ballVY = ball.body.getLinearVelocity().y;
+
+        PlayerEntity[] ps = {playerLeft, playerRight};
+        GoalkeeperEntity[] ks = {keeperLeft, keeperRight};
+        for (int i = 0; i < 2; i++) {
+            s.px[i] = ps[i].getPosition().x;
+            s.py[i] = ps[i].getPosition().y;
+            s.pvx[i] = ps[i].body.getLinearVelocity().x;
+            s.pvy[i] = ps[i].body.getLinearVelocity().y;
+            s.sliding[i] = ps[i].isSliding();
+            s.kickPower[i] = ps[i].getKickPower();
+            s.ky[i] = ks[i].getPosition().y;
+            s.kvy[i] = ks[i].body.getLinearVelocity().y;
+            s.kdive[i] = ks[i].getVisualDive();
+            s.kdiving[i] = ks[i].isDiving();
+            s.shots[i] = (byte) Math.min(127, stats.shots[i]);
+            s.shotsOnTarget[i] = (byte) Math.min(127, stats.shotsOnTarget[i]);
+            s.tackles[i] = (byte) Math.min(127, stats.tackles[i]);
+            s.saves[i] = (byte) Math.min(127, stats.saves[i]);
+        }
+        s.kickCount = kickEventCount;
+        s.slideCount = slideEventCount;
+        s.saveCount = saveEventCount;
+        s.lastKickPower = lastKickPower;
+    }
+
+    /** CLIENTE: copia el estado recibido del host sobre esta simulación (que no corre física propia). */
+    public void applySnapshot(Snapshot s) {
+        // Eventos: se disparan cuando el contador del host supera al último visto. El primer snapshot
+        // solo sincroniza los contadores (si no, al unirse a mitad de partido sonaría todo junto).
+        if (remoteInit) {
+            if (s.kickCount != remoteKickCount) pendingKickSfxPower = s.lastKickPower;
+            if (s.slideCount != remoteSlideCount) pendingSlideTackleSfx = true;
+            if (s.saveCount != remoteSaveCount) pendingSaveSfx = true;
+        }
+        remoteKickCount = s.kickCount;
+        remoteSlideCount = s.slideCount;
+        remoteSaveCount = s.saveCount;
+        remoteInit = true;
+
+        tick = s.tick;
+        Phase[] phases = Phase.values();
+        phase = phases[Math.max(0, Math.min(phases.length - 1, s.phase))];
+        half = s.half;
+        scoreLeft = s.scoreLeft;
+        scoreRight = s.scoreRight;
+        halfTimeRemaining = s.halfTimeRemaining;
+        phaseTimer = s.phaseTimer;
+        remoteReplayProgress = s.replayProgress;
+        remotePossessionLeft = s.possessionLeft;
+        lastGoalByLeft = s.lastGoalByLeft;
+        lastGoalMessage = s.lastGoalByLeft
+                ? "GOL de " + Constants.PLAYER_LEFT_NAME + " (AZUL)"
+                : "GOL de " + Constants.PLAYER_RIGHT_NAME + " (ROJO)";
+
+        ball.body.setTransform(s.ballX, s.ballY, s.ballAngle);
+        ball.body.setLinearVelocity(s.ballVX, s.ballVY);
+
+        PlayerEntity[] ps = {playerLeft, playerRight};
+        GoalkeeperEntity[] ks = {keeperLeft, keeperRight};
+        for (int i = 0; i < 2; i++) {
+            ps[i].body.setTransform(s.px[i], s.py[i], 0);
+            ps[i].body.setLinearVelocity(s.pvx[i], s.pvy[i]);
+            ps[i].setReplaySliding(s.sliding[i]);
+            ps[i].setDisplayKickPower(s.kickPower[i]);
+            ks[i].body.setTransform(ks[i].body.getPosition().x, s.ky[i], 0);
+            ks[i].body.setLinearVelocity(0, s.kvy[i]);
+            ks[i].setReplayDive(s.kdive[i]);
+            ks[i].setRemoteDiving(s.kdiving[i]);
+            stats.shots[i] = s.shots[i];
+            stats.shotsOnTarget[i] = s.shotsOnTarget[i];
+            stats.tackles[i] = s.tackles[i];
+            stats.saves[i] = s.saves[i];
+        }
     }
 
     public void dispose() {

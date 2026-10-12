@@ -34,6 +34,8 @@ public class PlayerEntity {
     private boolean sliding = false;
     private float slideTimer = 0f;
     private float slideCooldown = 0f;
+    /** MK5: tiempo restante tirado en el piso tras un planchazo (sin moverse ni patear). */
+    private float recoveryTimer = 0f;
     /** Evita que un mismo planchazo "toque" la pelota varias veces (una vez por planchazo). */
     private boolean slideBallTouched = false;
 
@@ -80,6 +82,13 @@ public class PlayerEntity {
 
         if (sliding) {
             kickChargeTime = 0f; // no se puede cargar un remate mientras se está tirado al piso
+            return;
+        }
+
+        if (recoveryTimer > 0f) {
+            // MK5: levantándose tras el planchazo; un planchazo errado deja al jugador vulnerable.
+            recoveryTimer -= dt;
+            kickChargeTime = 0f;
             return;
         }
 
@@ -131,6 +140,7 @@ public class PlayerEntity {
             if (slideTimer <= 0f) {
                 sliding = false;
                 slideCooldown = Constants.SLIDE_COOLDOWN;
+                recoveryTimer = Constants.SLIDE_RECOVERY_TIME;
                 // Frena un poco al levantarse, para que no siga "patinando" a máxima velocidad.
                 Vector2 v = body.getLinearVelocity();
                 body.setLinearVelocity(v.x * Constants.SLIDE_RECOVERY_BRAKE, v.y * Constants.SLIDE_RECOVERY_BRAKE);
@@ -152,6 +162,7 @@ public class PlayerEntity {
         sliding = false;
         slideTimer = 0f;
         slideCooldown = 0f;
+        recoveryTimer = 0f;
         kickChargeTime = 0f;
         slideBallTouched = false;
     }
@@ -161,9 +172,24 @@ public class PlayerEntity {
         sliding = value;
     }
 
+    /** Solo para el cliente online: muestra la barra de carga que informa el host. */
+    public void setDisplayKickPower(float power) {
+        kickChargeTime = Math.max(0f, Math.min(1f, power)) * Constants.KICK_CHARGE_TIME;
+    }
+
     /** Potencia de pateo actual, en 0..1, según cuánto tiempo se sostuvo el botón. */
     public float getKickPower() {
         return kickChargeTime / Constants.KICK_CHARGE_TIME;
+    }
+
+    /** MK5: true mientras está en el piso tras un planchazo (no puede moverse ni patear). */
+    public boolean isRecovering() {
+        return recoveryTimer > 0f;
+    }
+
+    /** MK5: alcance del planchazo a la pelota (más corto que el de pateo). */
+    public boolean isSlideReaching(Ball ball) {
+        return getPosition().dst(ball.getPosition()) <= Constants.SLIDE_REACH + Constants.BALL_RADIUS;
     }
 
     public boolean isNear(Ball ball) {

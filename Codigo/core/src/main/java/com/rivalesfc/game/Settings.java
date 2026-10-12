@@ -59,6 +59,8 @@ public final class Settings {
     /** Volumen maestro 0..1 (pasos de 0.1). */
     public static float volume = 0.8f;
     public static boolean muted = false;
+    /** Última IP de host escrita en el lobby para unirse online. */
+    public static String lastHostIp = "";
 
     private static final String PREFS = "rivalesfc_settings";
 
@@ -84,6 +86,7 @@ public final class Settings {
             if (!valid) halfMinutes = 3;
             volume = Math.max(0f, Math.min(1f, p.getFloat("volume", 0.8f)));
             muted = p.getBoolean("muted", false);
+            lastHostIp = p.getString("lastHostIp", "");
         } catch (Exception e) {
             // Sin preferencias legibles: se queda con los valores por defecto.
         }
@@ -96,6 +99,7 @@ public final class Settings {
             p.putInteger("halfMinutes", halfMinutes);
             p.putFloat("volume", volume);
             p.putBoolean("muted", muted);
+            p.putString("lastHostIp", lastHostIp);
             p.flush();
         } catch (Exception e) {
             // No es crítico si no se puede guardar.

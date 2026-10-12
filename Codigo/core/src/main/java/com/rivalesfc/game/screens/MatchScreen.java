@@ -29,6 +29,10 @@ import com.rivalesfc.game.entities.PlayerEntity;
 import com.rivalesfc.game.gfx.MotionTrail;
 import com.rivalesfc.game.gfx.PixelArtFactory;
 import com.rivalesfc.game.input.PlayerInput;
+import com.rivalesfc.game.net.NetClient;
+import com.rivalesfc.game.net.NetHost;
+import com.rivalesfc.game.net.Snapshot;
+import com.rivalesfc.game.net.SnapshotInterpolator;
 import com.rivalesfc.game.sim.MatchSimulation;
 import com.rivalesfc.game.audio.AudioFactory;
 import com.badlogic.gdx.audio.Sound;
@@ -83,15 +87,33 @@ public class MatchScreen implements Screen {
     private boolean kickHeldPrevLeft = false;
     private boolean kickHeldPrevRight = false;
 
+    // --- Online 1v1: el host simula y manda snapshots; el cliente manda su input y dibuja lo recibido ---
+    private final NetHost netHost;
+    private final NetClient netClient;
+    private final String netAddressText;
+    private final Snapshot netSnap = new Snapshot();
+    private final SnapshotInterpolator netInterp = new SnapshotInterpolator(); // MK5: suaviza al cliente
+    private int netSeq = 0;
+    private float netSendAccum = 0f;
+    private boolean hostHadClient = false;
+
     public MatchScreen(RivalesFCGame game, GameMode mode) {
+        this(game, mode, null, null, "");
+    }
+
+    public MatchScreen(RivalesFCGame game, GameMode mode, NetHost netHost, NetClient netClient, String netAddressText) {
         this.game = game;
         this.mode = mode;
+        this.netHost = netHost;
+        this.netClient = netClient;
+        this.netAddressText = netAddressText;
         this.sim = new MatchSimulation(mode);
     }
 
     private final OrthographicCamera camLeft = new OrthographicCamera();
     private final OrthographicCamera camRight = new OrthographicCamera();
     private final OrthographicCamera hudCam = new OrthographicCamera();
+    private final Vector2 focusBlend = new Vector2();
 
     private final ShapeRenderer shapes = new ShapeRenderer();
     private final SpriteBatch batch = new SpriteBatch();
@@ -181,8 +203,9 @@ public class MatchScreen implements Screen {
     public void render(float delta) {
         pollInput();
         handleGlobalKeys();
+        boolean simRuns = updateNetwork(delta);
 
-        if (!paused) {
+        if (!paused && simRuns) {
             sim.step(delta, inputLeft, inputRight);
             trailLeft.update(sim.getPlayerLeft().getPosition(), sim.getPlayerLeft().body.getLinearVelocity().len());
             trailRight.update(sim.getPlayerRight().getPosition(), sim.getPlayerRight().body.getLinearVelocity().len());
@@ -190,6 +213,7 @@ public class MatchScreen implements Screen {
             updateSfxAndFeedback(delta);
             updateConfetti(delta);
         }
+        sendSnapshotIfDue(delta);
 
         Gdx.gl.glEnable(GL20.GL_BLEND);
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
@@ -219,18 +243,38 @@ public class MatchScreen implements Screen {
         } else {
             replayFocusInit = false;
         }
-        updateCamera(camLeft, focusLeft, halfWidth, paneAreaHeight);
-        updateCamera(camRight, focusRight, rightWidth, paneAreaHeight);
+        if (mode.isOnline() || mode == GameMode.ONE_PLAYER) {
+            // MK5: un solo panel a pantalla completa con la vista propia (online: host = AZUL, cliente = ROJO;
+            // 1 jugador: vos sos el AZUL y la IA es el rival). Solo el 2 jugadores local divide la pantalla.
+            boolean isHost = mode != GameMode.ONLINE_CLIENT;
+            OrthographicCamera cam = isHost ? camLeft : camRight;
+            Vector2 selfFocus = isHost ? focusLeft : focusRight;
+            if (!replaying) {
+                // La cámara sigue mayormente al jugador pero se inclina hacia la pelota (30 %), así no se pierde la jugada.
+                focusBlend.set(selfFocus).lerp(sim.getBall().getPosition(), Constants.FULL_VIEW_BALL_BIAS);
+                selfFocus = focusBlend;
+            }
+            updateCamera(cam, selfFocus, screenWidth, paneAreaHeight, Constants.FULL_VIEW_HEIGHT);
+            String fullLabel = mode == GameMode.ONLINE_HOST ? "VOS - EQUIPO AZUL (HOST)"
+                    : mode == GameMode.ONLINE_CLIENT ? "VOS - EQUIPO ROJO"
+                    : "VOS - EQUIPO AZUL  vs  IA";
+            renderPane(0, 0, screenWidth, paneAreaHeight, cam, isHost, fullLabel, mode == GameMode.ONE_PLAYER);
+        } else {
+            updateCamera(camLeft, focusLeft, halfWidth, paneAreaHeight);
+            updateCamera(camRight, focusRight, rightWidth, paneAreaHeight);
 
-        // Panel izquierdo: vista del Jugador 1. Su rival se dibuja difuminado.
-        renderPane(0, 0, halfWidth, paneAreaHeight, camLeft, true, "JUGADOR 1 - EQUIPO AZUL");
+            // Panel izquierdo: vista del Jugador 1. Su rival se dibuja difuminado.
+            renderPane(0, 0, halfWidth, paneAreaHeight, camLeft, true, "JUGADOR 1 - EQUIPO AZUL", false);
 
-        // Panel derecho: vista del Jugador 2 (humano o IA de soporte, según el modo elegido en el lobby).
-        String rightLabel = mode == GameMode.ONE_PLAYER ? "IA - EQUIPO ROJO" : "JUGADOR 2 - EQUIPO ROJO";
-        renderPane(halfWidth, 0, rightWidth, paneAreaHeight, camRight, false, rightLabel);
+            // Panel derecho: vista del Jugador 2 (humano o IA de soporte, según el modo elegido en el lobby).
+            renderPane(halfWidth, 0, rightWidth, paneAreaHeight, camRight, false, "JUGADOR 2 - EQUIPO ROJO", false);
 
-        drawDivider(paneAreaHeight);
+            drawDivider(paneAreaHeight);
+        }
         drawSharedHud(paneAreaHeight, hudHeight);
+        if (mode.isOnline()) {
+            drawNetStatus();
+        }
 
         if (sim.getPhase() == MatchSimulation.Phase.FULL_TIME) {
             drawFullTimePanel();
@@ -249,11 +293,17 @@ public class MatchScreen implements Screen {
         if (Gdx.input.isKeyJustPressed(Input.Keys.F1)) {
             showDebug = !showDebug;
         }
-        if (Gdx.input.isKeyJustPressed(Input.Keys.P)) {
+        // Online no hay pausa ni reinicio: pausar al host congelaría al rival.
+        if (Gdx.input.isKeyJustPressed(Input.Keys.P) && !mode.isOnline()) {
             paused = !paused;
         }
         if (Gdx.input.isKeyJustPressed(Input.Keys.R)) {
-            restartMatch();
+            if (!mode.isOnline()) {
+                restartMatch();
+            } else if (mode == GameMode.ONLINE_HOST && netHost.hasClient()
+                    && sim.getPhase() == MatchSimulation.Phase.FULL_TIME) {
+                restartMatch(); // MK5: revancha online; el cliente recibe el partido nuevo por snapshots
+            }
         }
         if (Gdx.input.isKeyJustPressed(Input.Keys.TAB) && !paused) {
             sim.skipReplay();
@@ -263,8 +313,138 @@ public class MatchScreen implements Screen {
             Settings.save();
         }
         if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+            closeNetwork();
             game.setScreen(new LobbyScreen(game));
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Online 1v1
+    // ------------------------------------------------------------------
+
+    /**
+     * Atiende la red una vez por frame. Devuelve false si la simulación NO debe avanzar
+     * (host esperando rival). El cliente nunca simula: MatchSimulation.step() lo ignora y solo aplica snapshots.
+     */
+    private boolean updateNetwork(float delta) {
+        if (mode == GameMode.ONLINE_HOST) {
+            netHost.poll();
+            if (!netHost.hasClient()) {
+                inputRight.moveX = 0f;
+                inputRight.moveY = 0f;
+                inputRight.sprint = false;
+                inputRight.kickHeld = false;
+                inputRight.clearTransient();
+                return false; // sin rival la pelota no se mueve
+            }
+            hostHadClient = true;
+            netHost.drainInto(inputRight);
+            return true;
+        }
+        if (mode == GameMode.ONLINE_CLIENT) {
+            netClient.poll();
+            if (netClient.takeSnapshot(netSnap)) {
+                netInterp.push(netSnap, System.nanoTime());
+            }
+            // MK5: se dibuja el estado de hace ~70 ms mezclando los dos snapshots que lo rodean (60 fps parejos).
+            if (netInterp.sample(System.nanoTime(), netSnap)) {
+                sim.applySnapshot(netSnap);
+            }
+            netClient.sendInput(inputRight);
+            inputRight.clearTransient(); // los eventos se mandaron una vez; no se repiten
+            return true; // sim.step() no hace nada en el cliente, pero rastros, sonido y confeti sí deben correr
+        }
+        return true;
+    }
+
+    /** HOST: manda el estado ~30 veces por segundo (por tiempo, no por tick: en la repetición el tick no avanza). */
+    private void sendSnapshotIfDue(float delta) {
+        if (mode != GameMode.ONLINE_HOST || !netHost.hasClient()) {
+            return;
+        }
+        netSendAccum += delta;
+        if (netSendAccum < Constants.SIM_STEP) {
+            return;
+        }
+        netSendAccum = Math.min(netSendAccum - Constants.SIM_STEP, Constants.SIM_STEP);
+        sim.fillSnapshot(netSnap);
+        netSnap.tick = netSeq++; // el cliente descarta paquetes con número menor o igual al último
+        netHost.sendSnapshot(netSnap);
+    }
+
+    private void closeNetwork() {
+        if (netHost != null) netHost.close();
+        if (netClient != null) netClient.close();
+    }
+
+    /** Cartel de estado de la conexión (esperando rival, conectando, conexión perdida). */
+    private void drawNetStatus() {
+        String title = null;
+        String line = null;
+        if (mode == GameMode.ONLINE_HOST && !netHost.hasClient()) {
+            if (hostHadClient) {
+                title = "EL RIVAL SE DESCONECTO";
+                line = "Esperando que vuelva a entrar...  (" + netAddressText + ")";
+            } else {
+                title = "ESPERANDO AL RIVAL";
+                line = "Que elija UNIRSE e ingrese:  " + netAddressText;
+            }
+        } else if (mode == GameMode.ONLINE_CLIENT) {
+            NetClient.State st = netClient.getState();
+            if (st == NetClient.State.CONNECTING) {
+                title = "CONECTANDO...";
+                line = netAddressText;
+            } else if (st == NetClient.State.FAILED) {
+                title = "NO SE PUDO CONECTAR";
+                line = "Revisa la IP y que el host ya haya creado la partida";
+            } else if (st == NetClient.State.DISCONNECTED) {
+                title = "SE PERDIO LA CONEXION";
+                line = "El host cerro la partida o dejo de responder";
+            }
+        }
+        if (title == null) {
+            drawPingBadge();
+            return;
+        }
+        Gdx.gl.glViewport(0, 0, screenWidth, screenHeight);
+        hudCam.setToOrtho(false, screenWidth, screenHeight);
+        hudCam.update();
+        shapes.setProjectionMatrix(hudCam.combined);
+        shapes.begin(ShapeRenderer.ShapeType.Filled);
+        shapes.setColor(0f, 0f, 0f, 0.6f);
+        shapes.rect(0, 0, screenWidth, screenHeight);
+        shapes.end();
+
+        batch.setProjectionMatrix(hudCam.combined);
+        batch.begin();
+        float cx = screenWidth / 2f;
+        float y = screenHeight / 2f + 40f;
+        drawCentered(title, cx, y, 2.4f, Color.WHITE);
+        drawCentered(line, cx, y - 56f, 1.2f, new Color(0.9f, 0.9f, 0.6f, 1f));
+        drawCentered("ESC  volver al menu", cx, y - 100f, 1.0f, new Color(0.8f, 0.8f, 0.82f, 1f));
+        font.getData().setScale(1f);
+        batch.end();
+    }
+
+    /** MK5: ping en la esquina inferior izquierda (verde < 60 ms, amarillo < 120, rojo más). */
+    private void drawPingBadge() {
+        int ping = mode == GameMode.ONLINE_CLIENT ? netClient.getPingMs() : netHost.getClientPingMs();
+        if (ping < 0) {
+            return;
+        }
+        Color c = ping < 60 ? new Color(0.45f, 0.95f, 0.5f, 1f)
+                : ping < 120 ? new Color(0.98f, 0.85f, 0.3f, 1f)
+                : new Color(0.95f, 0.35f, 0.3f, 1f);
+        Gdx.gl.glViewport(0, 0, screenWidth, screenHeight);
+        hudCam.setToOrtho(false, screenWidth, screenHeight);
+        hudCam.update();
+        batch.setProjectionMatrix(hudCam.combined);
+        batch.begin();
+        font.getData().setScale(1.0f);
+        font.setColor(c);
+        font.draw(batch, "PING " + ping + " ms", 12f, 24f);
+        font.setColor(Color.WHITE);
+        batch.end();
     }
 
     private void restartMatch() {
@@ -296,6 +476,17 @@ public class MatchScreen implements Screen {
         if (kickHeldPrevLeft && !spacePressed) inputLeft.kickReleased = true;
         inputLeft.kickHeld = spacePressed;
         kickHeldPrevLeft = spacePressed;
+
+        if (mode == GameMode.ONLINE_CLIENT) {
+            // El cliente controla al equipo ROJO con el mismo esquema (WASD / Shift / Ctrl / Espacio).
+            inputRight.moveX = inputLeft.moveX;
+            inputRight.moveY = inputLeft.moveY;
+            inputRight.sprint = inputLeft.sprint;
+            inputRight.kickHeld = inputLeft.kickHeld;
+            inputRight.kickReleased |= inputLeft.kickReleased;
+            inputRight.slidePressed |= inputLeft.slidePressed;
+            inputLeft.clearTransient();
+        }
 
         if (mode == GameMode.TWO_PLAYERS) {
             inputRight.moveX = 0;
@@ -440,9 +631,13 @@ public class MatchScreen implements Screen {
     // ------------------------------------------------------------------
 
     private void updateCamera(OrthographicCamera cam, Vector2 focus, int paneWidthPx, int paneHeightPx) {
+        updateCamera(cam, focus, paneWidthPx, paneHeightPx, Constants.SPLIT_VIEW_HEIGHT);
+    }
+
+    private void updateCamera(OrthographicCamera cam, Vector2 focus, int paneWidthPx, int paneHeightPx, float viewHeight) {
         float aspect = paneHeightPx == 0 ? 1f : (float) paneWidthPx / (float) paneHeightPx;
-        cam.viewportHeight = Constants.SPLIT_VIEW_HEIGHT;
-        cam.viewportWidth = Constants.SPLIT_VIEW_HEIGHT * aspect;
+        cam.viewportHeight = viewHeight;
+        cam.viewportWidth = viewHeight * aspect;
 
         float halfFieldW = Constants.FIELD_WIDTH / 2f + Constants.FIELD_MARGIN;
         float halfFieldH = Constants.FIELD_HEIGHT / 2f + Constants.FIELD_MARGIN;
@@ -470,7 +665,8 @@ public class MatchScreen implements Screen {
     // Render de cada mitad de pantalla
     // ------------------------------------------------------------------
 
-    private void renderPane(int x, int y, int w, int h, OrthographicCamera cam, boolean leftIsSelf, String cornerLabel) {
+    private void renderPane(int x, int y, int w, int h, OrthographicCamera cam, boolean leftIsSelf, String cornerLabel,
+                            boolean sharpRival) {
         Gdx.gl.glViewport(x, y, w, h);
 
         PlayerEntity self = leftIsSelf ? sim.getPlayerLeft() : sim.getPlayerRight();
@@ -495,7 +691,11 @@ public class MatchScreen implements Screen {
 
         // El rival humano se dibuja primero (con su rastro) para quedar "detrás" visualmente.
         rivalTrail.render(shapes(cam), rival.teamColor, Constants.PLAYER_RADIUS * 0.9f);
-        drawBlurredRival(cam, rival, rivalRegion, rivalName);
+        if (sharpRival) {
+            drawSharpRival(cam, rival, rivalRegion, rivalName); // MK5: contra la IA no hace falta difuminarla
+        } else {
+            drawBlurredRival(cam, rival, rivalRegion, rivalName);
+        }
 
         selfTrail.render(shapes(cam), self.teamColor, Constants.PLAYER_RADIUS * 0.9f);
         drawSelfPlayer(cam, self, selfRegion, selfName);
@@ -635,6 +835,17 @@ public class MatchScreen implements Screen {
      * shaders/FrameBuffer (fuera del alcance actual), ahora aplicado sobre el
      * sprite pixel-art en vez de un círculo liso.
      */
+    /** MK5: rival nítido (sin difuminado ni anillo), para el modo 1 jugador a pantalla completa. */
+    private void drawSharpRival(OrthographicCamera cam, PlayerEntity rival, TextureRegion region, String name) {
+        Vector2 pos = rival.getPosition();
+        if (rival.isSliding()) {
+            drawSlideDust(cam, pos);
+        }
+        drawCharacterSprite(cam, region, pos, rival.body.getLinearVelocity().x, 1f, rival.isSliding(),
+                rival.body.getLinearVelocity().len());
+        drawNameTag(cam, pos, name, rival.teamColor);
+    }
+
     private void drawBlurredRival(OrthographicCamera cam, PlayerEntity rival, TextureRegion region, String name) {
         Vector2 pos = rival.getPosition();
         float vx = rival.body.getLinearVelocity().x;
@@ -861,7 +1072,7 @@ public class MatchScreen implements Screen {
             // Recordatorio de controles solo en el saque inicial del primer tiempo (sim.getHalf()==1),
             // para no repetirlo en cada reinicio de jugada y no tapar la acción una vez arrancado el partido.
             if (sim.getHalf() == 1 && sim.getScoreLeft() == 0 && sim.getScoreRight() == 0) {
-                drawControlsHint(paneWidthPx, paneHeightPx, cornerLabel.startsWith("JUGADOR 1"));
+                drawControlsHint(paneWidthPx, paneHeightPx, !cornerLabel.startsWith("JUGADOR 2"));
             }
         } else if (phase == MatchSimulation.Phase.GOAL_CELEBRATION) {
             String msg = sim.getLastGoalMessage() != null ? sim.getLastGoalMessage() : "GOOOL";
@@ -1171,7 +1382,10 @@ public class MatchScreen implements Screen {
 
         drawCentered("MEJOR JUGADOR: " + names[mvp] + "  -  " + String.format("%.1f", ratings[mvp]),
                 cx, mvpBandY + mvpBandH - 12f * k, 1.3f * k, new Color(1f, 0.9f, 0.3f, 1f));
-        drawCentered("R reiniciar   -   ESC menú principal", cx, py + 30f * k, 0.9f * k, new Color(0.85f, 0.85f, 0.85f, 1f));
+        String fullTimeHint = "R reiniciar   -   ESC menú principal";
+        if (mode == GameMode.ONLINE_HOST) fullTimeHint = "R revancha   -   ESC menú principal";
+        if (mode == GameMode.ONLINE_CLIENT) fullTimeHint = "Esperando revancha del host   -   ESC menú principal";
+        drawCentered(fullTimeHint, cx, py + 30f * k, 0.9f * k, new Color(0.85f, 0.85f, 0.85f, 1f));
         font.getData().setScale(1f);
         batch.end();
     }
@@ -1233,10 +1447,12 @@ public class MatchScreen implements Screen {
 
     @Override
     public void hide() {
+        closeNetwork();
     }
 
     @Override
     public void dispose() {
+        closeNetwork();
         shapes.dispose();
         batch.dispose();
         font.dispose();

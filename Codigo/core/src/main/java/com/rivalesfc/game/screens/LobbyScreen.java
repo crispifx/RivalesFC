@@ -2,6 +2,7 @@ package com.rivalesfc.game.screens;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
@@ -13,6 +14,12 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.rivalesfc.game.GameMode;
 import com.rivalesfc.game.RivalesFCGame;
 import com.rivalesfc.game.Settings;
+import com.rivalesfc.game.net.NetClient;
+import com.rivalesfc.game.net.NetHost;
+import com.rivalesfc.game.net.NetInfo;
+import com.rivalesfc.game.net.Protocol;
+
+import java.io.IOException;
 
 /**
  * Lobby previo al partido (secc. 1.1 "Lobby de sala previo al partido" de la
@@ -36,9 +43,19 @@ public class LobbyScreen implements Screen {
     private int screenWidth = 1280;
     private int screenHeight = 800;
 
-    /** Filas navegables: 0 = 1 jugador, 1 = 2 jugadores, 2 = dificultad, 3 = duración, 4 = volumen. */
+    /**
+     * Filas navegables: 0 = 1 jugador, 1 = 2 jugadores, 2 = crear partida online (host),
+     * 3 = unirse a partida online (IP), 4 = dificultad, 5 = duración, 6 = volumen.
+     */
     private int row = 0;
-    private static final int ROWS = 5;
+    private static final int ROWS = 7;
+    private static final int ROW_HOST = 2;
+    private static final int ROW_JOIN = 3;
+    private static final int ROW_OPTIONS = 4;
+
+    private final String localIp = NetInfo.localAddress();
+    private String joinIp = Settings.lastHostIp;
+    private String status = "";
 
     public LobbyScreen(RivalesFCGame game) {
         this.game = game;
@@ -46,6 +63,18 @@ public class LobbyScreen implements Screen {
 
     @Override
     public void show() {
+        // Solo para escribir la IP: acepta dígitos, punto y dos puntos cuando está elegida la fila "unirse".
+        Gdx.input.setInputProcessor(new InputAdapter() {
+            @Override
+            public boolean keyTyped(char c) {
+                if (row == ROW_JOIN && (Character.isDigit(c) || c == '.' || c == ':') && joinIp.length() < 21) {
+                    joinIp += c;
+                    status = "";
+                    return true;
+                }
+                return false;
+            }
+        });
     }
 
     @Override
@@ -74,6 +103,9 @@ public class LobbyScreen implements Screen {
         boolean down = Gdx.input.isKeyJustPressed(Input.Keys.DOWN) || Gdx.input.isKeyJustPressed(Input.Keys.S);
         if (up) row = (row + ROWS - 1) % ROWS;
         if (down) row = (row + 1) % ROWS;
+        if (row == ROW_JOIN && Gdx.input.isKeyJustPressed(Input.Keys.BACKSPACE) && !joinIp.isEmpty()) {
+            joinIp = joinIp.substring(0, joinIp.length() - 1);
+        }
 
         int dir = 0;
         if (Gdx.input.isKeyJustPressed(Input.Keys.LEFT) || Gdx.input.isKeyJustPressed(Input.Keys.A)) dir = -1;
@@ -86,12 +118,16 @@ public class LobbyScreen implements Screen {
         GameMode start = null;
         if (confirm && row == 0) start = GameMode.ONE_PLAYER;
         if (confirm && row == 1) start = GameMode.TWO_PLAYERS;
-        // Atajos directos: 1 o 2 elige y confirma de una.
-        if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_1)) start = GameMode.ONE_PLAYER;
-        if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_2)) start = GameMode.TWO_PLAYERS;
+        // Atajos directos: 1 o 2 elige y confirma de una (no con la fila de IP: ahí los números se escriben).
+        if (row != ROW_JOIN && Gdx.input.isKeyJustPressed(Input.Keys.NUM_1)) start = GameMode.ONE_PLAYER;
+        if (row != ROW_JOIN && Gdx.input.isKeyJustPressed(Input.Keys.NUM_2)) start = GameMode.TWO_PLAYERS;
         // Con Enter sobre una fila de opciones no arranca: cicla el valor.
-        if (confirm && row >= 2) {
+        if (confirm && row >= ROW_OPTIONS) {
             adjust(row, 1);
+        }
+        if (Gdx.input.isKeyJustPressed(Input.Keys.ENTER)) {
+            if (row == ROW_HOST) startOnlineHost();
+            if (row == ROW_JOIN) startOnlineClient();
         }
 
         if (start != null) {
@@ -100,19 +136,55 @@ public class LobbyScreen implements Screen {
         }
     }
 
+    private void startOnlineHost() {
+        NetHost host = new NetHost();
+        try {
+            host.start(Protocol.DEFAULT_PORT);
+        } catch (IOException e) {
+            status = "No se pudo abrir el puerto " + Protocol.DEFAULT_PORT + " (¿ya hay otro juego abierto?)";
+            return;
+        }
+        Settings.save();
+        game.setScreen(new MatchScreen(game, GameMode.ONLINE_HOST, host, null, localIp));
+    }
+
+    private void startOnlineClient() {
+        String text = joinIp.trim();
+        if (text.isEmpty()) {
+            status = "Escribí la IP del host (la muestra su lobby).";
+            return;
+        }
+        String ip = text;
+        int port = Protocol.DEFAULT_PORT;
+        int colon = text.indexOf(':');
+        try {
+            if (colon >= 0) {
+                ip = text.substring(0, colon);
+                port = Integer.parseInt(text.substring(colon + 1));
+            }
+            NetClient client = new NetClient();
+            client.connect(ip, port);
+            Settings.lastHostIp = text;
+            Settings.save();
+            game.setScreen(new MatchScreen(game, GameMode.ONLINE_CLIENT, null, client, text));
+        } catch (IOException | RuntimeException e) {
+            status = "IP o puerto inválido: " + text;
+        }
+    }
+
     /** Cambia el valor de una fila de opciones (dir = -1 / +1) y lo guarda. */
     private void adjust(int r, int dir) {
-        if (r == 2) {
+        if (r == 4) {
             int n = Settings.Difficulty.values().length;
             Settings.difficulty = Settings.Difficulty.values()[(Settings.difficulty.ordinal() + dir + n) % n];
-        } else if (r == 3) {
+        } else if (r == 5) {
             int idx = 0;
             for (int i = 0; i < Settings.HALF_MINUTES_OPTIONS.length; i++) {
                 if (Settings.HALF_MINUTES_OPTIONS[i] == Settings.halfMinutes) idx = i;
             }
             int n = Settings.HALF_MINUTES_OPTIONS.length;
             Settings.halfMinutes = Settings.HALF_MINUTES_OPTIONS[(idx + dir + n) % n];
-        } else if (r == 4) {
+        } else if (r == 6) {
             Settings.muted = false;
             Settings.volume = Math.max(0f, Math.min(1f, Math.round((Settings.volume + dir * 0.1f) * 10f) / 10f));
         } else {
@@ -152,30 +224,46 @@ public class LobbyScreen implements Screen {
 
     private void drawOptionCards() {
         float cardW = Math.min(520f, screenWidth * 0.6f);
-        float cardH = 84f;
-        float gap = 14f;
+        float cardH = 70f;
+        float rowH = 38f;
+        float gap = 8f;
         float x = screenWidth / 2f - cardW / 2f;
-        float startY = screenHeight * 0.62f - cardH;
+        float y = screenHeight * 0.70f;
 
-        drawOptionCard(x, startY, cardW, cardH,
-                "1 JUGADOR",
-                "Vos (WASD) contra la IA de soporte",
-                row == 0);
+        y -= cardH;
+        drawOptionCard(x, y, cardW, cardH, "1 JUGADOR", "Pantalla completa: vos (WASD) contra la IA", row == 0);
+        y -= cardH + gap;
+        drawOptionCard(x, y, cardW, cardH, "2 JUGADORES", "Pantalla dividida local: WASD vs. Flechas", row == 1);
 
-        drawOptionCard(x, startY - cardH - gap, cardW, cardH,
-                "2 JUGADORES",
-                "Pantalla dividida local: WASD vs. Flechas",
-                row == 1);
+        y -= 12f + rowH;
+        drawSettingRow(x, y, cardW, rowH, "ONLINE: CREAR PARTIDA", "ENTER  -  tu IP: " + localIp, row == ROW_HOST, false);
+        y -= rowH + gap;
+        drawSettingRow(x, y, cardW, rowH, "ONLINE: UNIRSE (IP del host)",
+                joinIp + (row == ROW_JOIN ? "_" : ""), row == ROW_JOIN, false);
 
-        float optH = 38f;
-        float oy = startY - cardH * 2 - gap * 2 - 24f - optH;
-        drawSettingRow(x, oy, cardW, optH, "DIFICULTAD (IA y arqueros)", Settings.difficulty.label, row == 2);
-        drawSettingRow(x, oy - optH - 8f, cardW, optH, "DURACION DE CADA TIEMPO", Settings.halfMinutes + " min", row == 3);
+        y -= 12f + rowH;
+        drawSettingRow(x, y, cardW, rowH, "DIFICULTAD (IA y arqueros)", Settings.difficulty.label, row == 4);
+        y -= rowH + gap;
+        drawSettingRow(x, y, cardW, rowH, "DURACION DE CADA TIEMPO", Settings.halfMinutes + " min", row == 5);
+        y -= rowH + gap;
         String vol = Settings.muted ? "SILENCIO" : Math.round(Settings.volume * 100) + "%";
-        drawSettingRow(x, oy - (optH + 8f) * 2, cardW, optH, "VOLUMEN", vol, row == 4);
+        drawSettingRow(x, y, cardW, rowH, "VOLUMEN", vol, row == 6);
+
+        if (!status.isEmpty()) {
+            batch.begin();
+            font.getData().setScale(1f);
+            GlyphLayout sl = new GlyphLayout(font, status);
+            font.setColor(1f, 0.45f, 0.4f, 1f);
+            font.draw(batch, sl, screenWidth / 2f - sl.width / 2f, 76f);
+            batch.end();
+        }
     }
 
     private void drawSettingRow(float x, float y, float w, float h, String label, String value, boolean isSelected) {
+        drawSettingRow(x, y, w, h, label, value, isSelected, true);
+    }
+
+    private void drawSettingRow(float x, float y, float w, float h, String label, String value, boolean isSelected, boolean showArrows) {
         shapes.begin(ShapeRenderer.ShapeType.Filled);
         shapes.setColor(isSelected ? new Color(0.16f, 0.32f, 0.18f, 1f) : new Color(0.10f, 0.11f, 0.13f, 0.92f));
         shapes.rect(x, y, w, h);
@@ -189,7 +277,7 @@ public class LobbyScreen implements Screen {
         font.getData().setScale(0.95f);
         font.setColor(isSelected ? Color.WHITE : new Color(0.8f, 0.8f, 0.82f, 1f));
         font.draw(batch, label, x + 16f, y + h / 2f + 7f);
-        GlyphLayout v = new GlyphLayout(font, (isSelected ? "<  " : "") + value + (isSelected ? "  >" : ""));
+        GlyphLayout v = new GlyphLayout(font, (isSelected && showArrows ? "<  " : "") + value + (isSelected && showArrows ? "  >" : ""));
         font.setColor(isSelected ? new Color(0.98f, 0.9f, 0.35f, 1f) : Color.WHITE);
         font.draw(batch, v, x + w - v.width - 16f, y + h / 2f + 7f);
         font.getData().setScale(1f);

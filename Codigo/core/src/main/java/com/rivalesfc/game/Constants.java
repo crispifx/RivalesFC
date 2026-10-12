@@ -60,17 +60,20 @@ public final class Constants {
     public static final float BALL_FRICTION = 0.2f;
 
     // --- Pase / remate (potencia variable, secc. 1.2) ---
-    public static final float KICK_RANGE = 0.9f;          // distancia máxima jugador-pelota para patear
+    public static final float KICK_RANGE = 1.05f;         // MK5: antes 0,9; pateo más permisivo (distancia máxima jugador-pelota)
     public static final float PASS_IMPULSE_MIN = 1.1f;   // MK4: antes 3 (~39 m/s, ya pegado al tope de Box2D)
-    public static final float SHOT_IMPULSE_MAX = 2.9f;   // MK4: antes 16 (>200 m/s teóricos; Box2D lo recortaba a 60)
-    public static final float KICK_CHARGE_TIME = 1.0f;     // segundos para cargar potencia máxima
+    public static final float SHOT_IMPULSE_MAX = 3.8f;   // MK5 BUFF: antes 2,9 (~38 m/s); ahora ~50 m/s, por debajo del tope de Box2D (~60 m/s)
+    public static final float KICK_CHARGE_TIME = 0.75f;    // MK5 BUFF: antes 1,0; se llega a la potencia máxima más rápido
+    public static final float AIM_ASSIST = 1.2f;           // MK5: cuánto pesa la dirección en que te movés al patear (0 = solo hacia donde está la pelota)
 
     // --- Planchazo / barrida (nuevo) ---
-    public static final float SLIDE_SPEED = 9.5f;         // m/s durante el planchazo (más rápido que el sprint)
-    public static final float SLIDE_DURATION = 0.35f;      // segundos que dura el impulso del planchazo
-    public static final float SLIDE_COOLDOWN = 1.0f;       // segundos de recarga antes de poder repetirlo
+    public static final float SLIDE_SPEED = 8.0f;         // MK5 NERF: antes 9,5; durante el planchazo (aún más rápido que caminar, pero ya no más que el sprint)
+    public static final float SLIDE_DURATION = 0.30f;      // MK5 NERF: antes 0,35; el alcance total baja de ~3,3 m a ~2,4 m
+    public static final float SLIDE_COOLDOWN = 1.8f;       // MK5 NERF: antes 1,0; no se puede spamear
+    public static final float SLIDE_RECOVERY_TIME = 0.35f; // MK5 NERF: segundos que el jugador queda en el piso sin poder moverse ni patear tras el planchazo
+    public static final float SLIDE_REACH = 0.8f;          // MK5 NERF: alcance del planchazo a la pelota (antes usaba KICK_RANGE = 0,9)
     public static final float SLIDE_RECOVERY_BRAKE = 0.35f; // frenado aplicado a la velocidad al terminar el planchazo
-    public static final float SLIDE_KICK_POWER = 0.35f;     // potencia (0..1) del toque que le da a la pelota si la alcanza
+    public static final float SLIDE_KICK_POWER = 0.22f;     // MK5 NERF: antes 0,35; el toque que le da a la pelota es más flojo
 
     // --- Arquero (100% IA, secc. 1.1 "arquero automático") ---
     // Único estado de IA: seguir la coordenada Y de la pelota, sin salir de la boca del arco.
@@ -110,11 +113,14 @@ public final class Constants {
 
     // --- Pantalla dividida ---
     public static final float SPLIT_VIEW_HEIGHT = 16f;   // metros visibles verticalmente por cámara
+    // --- MK5: pantalla completa (1 jugador y online) ---
+    public static final float FULL_VIEW_HEIGHT = 20f;    // metros visibles en vertical; con un solo panel conviene ver más cancha
+    public static final float FULL_VIEW_BALL_BIAS = 0.3f; // 0 = cámara solo sobre el jugador, 1 = solo sobre la pelota
     public static final float RIVAL_BLUR_ALPHA = 0.30f;  // opacidad base del jugador rival difuminado
 
     // --- Barra superior compartida (reloj + marcador + título del partido) ---
     public static final int HUD_HEIGHT_PX = 108;
-    public static final String MATCH_TITLE = "MATCH: Rivales F.C. (Local 2v2)";
+    public static final String MATCH_TITLE = "MATCH: Rivales F.C.";
 
     // --- Tiempos de partido ---
     public static final float HALF_DURATION_SECONDS = 180f;   // 3:00 por tiempo

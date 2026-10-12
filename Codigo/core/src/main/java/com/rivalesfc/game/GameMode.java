@@ -13,5 +13,13 @@ package com.rivalesfc.game;
  */
 public enum GameMode {
     ONE_PLAYER,
-    TWO_PLAYERS
+    TWO_PLAYERS,
+    /** Online 1v1, lado HOST: corre la simulación; es el equipo AZUL (izquierda). El rival llega por red. */
+    ONLINE_HOST,
+    /** Online 1v1, lado CLIENTE: no simula; manda su input al host y dibuja lo que recibe. Es el equipo ROJO. */
+    ONLINE_CLIENT;
+
+    public boolean isOnline() {
+        return this == ONLINE_HOST || this == ONLINE_CLIENT;
+    }
 }

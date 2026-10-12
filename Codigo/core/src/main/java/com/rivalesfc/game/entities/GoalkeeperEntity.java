@@ -200,6 +200,11 @@ public class GoalkeeperEntity {
         return visualDive;
     }
 
+    /** Solo para el cliente online: refleja si el host dice que el arquero se está tirando (para el sonido). */
+    public void setRemoteDiving(boolean value) {
+        diving = value;
+    }
+
     /** Solo para la repetición: fuerza el estado visual sin tocar la IA. */
     public void setReplayDive(float value) {
         visualDive = value;
