@@ -206,6 +206,11 @@ public class PlayerEntity {
         return sliding ? 1f - MathUtils.clamp(slideTimer / Constants.SLIDE_DURATION, 0f, 1f) : 0f;
     }
 
+    /** MK6: 0..1 de cuánto falta para volver a poder hacer planchazo (0 = listo). Solo es fiable donde corre la simulación. */
+    public float getSlideCooldownFraction() {
+        return MathUtils.clamp(slideCooldown / Constants.SLIDE_COOLDOWN, 0f, 1f);
+    }
+
     public Vector2 getSlideDirection() {
         return slideDirection;
     }

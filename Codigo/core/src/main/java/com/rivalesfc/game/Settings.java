@@ -61,6 +61,10 @@ public final class Settings {
     public static boolean muted = false;
     /** Última IP de host escrita en el lobby para unirse online. */
     public static String lastHostIp = "";
+    /** MK6: nombre del jugador (se muestra sobre el personaje y en los carteles) y equipos elegidos (índices de {@link Team#ALL}). */
+    public static String playerName = "JUGADOR";
+    public static int teamIndex = 0;
+    public static int rivalTeamIndex = 1;
 
     private static final String PREFS = "rivalesfc_settings";
 
@@ -87,6 +91,10 @@ public final class Settings {
             volume = Math.max(0f, Math.min(1f, p.getFloat("volume", 0.8f)));
             muted = p.getBoolean("muted", false);
             lastHostIp = p.getString("lastHostIp", "");
+            playerName = com.rivalesfc.game.net.Protocol.cleanName(p.getString("playerName", "JUGADOR"));
+            if (playerName.isEmpty()) playerName = "JUGADOR";
+            teamIndex = Math.floorMod(p.getInteger("teamIndex", 0), Team.ALL.length);
+            rivalTeamIndex = Math.floorMod(p.getInteger("rivalTeamIndex", 1), Team.ALL.length);
         } catch (Exception e) {
             // Sin preferencias legibles: se queda con los valores por defecto.
         }
@@ -100,6 +108,9 @@ public final class Settings {
             p.putFloat("volume", volume);
             p.putBoolean("muted", muted);
             p.putString("lastHostIp", lastHostIp);
+            p.putString("playerName", playerName);
+            p.putInteger("teamIndex", teamIndex);
+            p.putInteger("rivalTeamIndex", rivalTeamIndex);
             p.flush();
         } catch (Exception e) {
             // No es crítico si no se puede guardar.

@@ -35,6 +35,21 @@ public class NetClient {
     private long lastPingNanos;
     private int pingMs = -1; // MK5: ida y vuelta al host, suavizado; -1 = todavía sin medir
     private final ByteBuffer buf = ByteBuffer.allocate(Protocol.MAX_PACKET);
+    // MK6: identidad propia (se manda en el HELLO) y la del host (llega en el WELCOME).
+    private int localTeam = 0;
+    private String localName = "";
+    private Protocol.Identity hostIdentity;
+
+    /** Equipo y nombre que se le mandan al host; llamar antes de {@link #connect}. */
+    public void setLocalIdentity(int team, String name) {
+        localTeam = team;
+        localName = name;
+    }
+
+    /** Identidad del host, o null si todavía no llegó (o es un host sin identidad). */
+    public Protocol.Identity getHostIdentity() {
+        return hostIdentity;
+    }
 
     /** Empieza a conectar; el resultado se ve en {@link #getState()} tras llamar a poll(). */
     public void connect(String host, int port) throws IOException {
@@ -49,6 +64,7 @@ public class NetClient {
         hasNew = false;
         lastPingNanos = 0;
         pingMs = -1;
+        hostIdentity = null;
     }
 
     /** MK5: ping (ida y vuelta) en milisegundos, o -1 si todavía no se midió. */
@@ -76,7 +92,7 @@ public class NetClient {
             }
             if (lastHelloNanos == 0 || now - lastHelloNanos > HELLO_INTERVAL_NANOS) {
                 lastHelloNanos = now;
-                sendSimple(Protocol.HELLO); // se reintenta hasta recibir WELCOME
+                sendHello(); // se reintenta hasta recibir WELCOME
             }
         }
 
@@ -98,6 +114,10 @@ public class NetClient {
                 buf.flip();
                 int type = Protocol.readType(buf);
                 if (type >= 0) lastRecvNanos = now;
+                if (type == Protocol.WELCOME) {
+                    Protocol.Identity id = Protocol.readIdentity(buf);
+                    if (id != null) hostIdentity = id;
+                }
                 if (type == Protocol.WELCOME && state == State.CONNECTING) {
                     state = State.CONNECTED;
                     lastRecvNanos = now;
@@ -150,6 +170,16 @@ public class NetClient {
         try {
             Protocol.writeHeader(buf, Protocol.PING);
             Protocol.writePing(buf, (int) (nowNanos / 1_000_000L), pingMs);
+            buf.flip();
+            channel.write(buf);
+        } catch (IOException ignored) {
+        }
+    }
+
+    private void sendHello() {
+        try {
+            Protocol.writeHeader(buf, Protocol.HELLO);
+            Protocol.writeIdentity(buf, localTeam, localName);
             buf.flip();
             channel.write(buf);
         } catch (IOException ignored) {

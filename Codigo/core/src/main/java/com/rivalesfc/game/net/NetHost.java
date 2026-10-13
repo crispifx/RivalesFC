@@ -29,6 +29,21 @@ public class NetHost {
     private final PlayerInput scratch = new PlayerInput();
     private final ByteBuffer buf = ByteBuffer.allocate(Protocol.MAX_PACKET);
     private final ByteBuffer out = ByteBuffer.allocate(Protocol.MAX_PACKET);
+    // MK6: identidad propia (va en el WELCOME) y la del cliente (llega en el HELLO).
+    private int localTeam = 0;
+    private String localName = "";
+    private Protocol.Identity clientIdentity;
+
+    /** Equipo y nombre que se le mandan al cliente. */
+    public void setLocalIdentity(int team, String name) {
+        localTeam = team;
+        localName = name;
+    }
+
+    /** Identidad del cliente conectado, o null si no hay cliente (o es una versión sin identidad). */
+    public Protocol.Identity getClientIdentity() {
+        return clientIdentity;
+    }
 
     /** Abre el puerto UDP. Con puerto 0 el sistema elige uno libre (útil para pruebas). */
     public void start(int port) throws IOException {
@@ -74,6 +89,7 @@ public class NetHost {
         if (type < 0) return;
 
         if (type == Protocol.HELLO) {
+            Protocol.Identity id = Protocol.readIdentity(buf); // antes de reusar buf para responder
             if (client == null) {
                 client = from;
                 hasSeq = false;
@@ -85,7 +101,13 @@ public class NetHost {
             }
             if (from.equals(client)) {
                 lastRecvNanos = System.nanoTime();
-                sendSimple(Protocol.WELCOME); // se repite si el WELCOME anterior se perdió
+                if (id != null) clientIdentity = id;
+                // se repite si el WELCOME anterior se perdió
+                out.clear();
+                Protocol.writeHeader(out, Protocol.WELCOME);
+                Protocol.writeIdentity(out, localTeam, localName);
+                out.flip();
+                channel.send(out, client);
             }
             return;
         }
@@ -170,6 +192,7 @@ public class NetHost {
 
     private void dropClient() {
         client = null;
+        clientIdentity = null;
         clientPingMs = -1;
         hasSeq = false;
         latest.clearTransient();

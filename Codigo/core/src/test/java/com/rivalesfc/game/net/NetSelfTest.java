@@ -30,9 +30,19 @@ public class NetSelfTest {
         host.start(0);
         int port = host.getPort();
         NetClient client = new NetClient();
+        host.setLocalIdentity(2, "ana");
+        client.setLocalIdentity(5, "Beto 9!@#");
         client.connect("127.0.0.1", port);
 
         pump(host, client, 300);
+        check("MK6: host recibe equipo y nombre limpio del cliente",
+                host.getClientIdentity() != null && host.getClientIdentity().team == 5
+                        && host.getClientIdentity().name.equals("BETO 9"));
+        check("MK6: cliente recibe equipo y nombre del host",
+                client.getHostIdentity() != null && client.getHostIdentity().team == 2
+                        && client.getHostIdentity().name.equals("ANA"));
+        check("MK6: nombre largo se recorta a 12", Protocol.cleanName("abcdefghijklmnopqrst").length() == 12);
+        check("MK6: sin cuerpo no hay identidad", Protocol.readIdentity(ByteBuffer.allocate(0)) == null);
         check("cliente conectado", client.isConnected());
         check("host ve al cliente", host.hasClient());
 

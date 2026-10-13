@@ -124,6 +124,7 @@ public final class Constants {
 
     // --- Tiempos de partido ---
     public static final float HALF_DURATION_SECONDS = 180f;   // 3:00 por tiempo
+    public static final float OVERTIME_SECONDS = 60f;        // MK6: tiempo extra con gol de oro si hay empate
     public static final float KICKOFF_FREEZE_SECONDS = 3f;    // cuenta regresiva antes de jugar
     public static final float GOAL_CELEBRATION_SECONDS = 2.0f;
     public static final float HALFTIME_BREAK_SECONDS = 4f;

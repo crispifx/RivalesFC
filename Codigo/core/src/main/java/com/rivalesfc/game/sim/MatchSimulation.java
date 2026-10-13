@@ -8,8 +8,10 @@ import com.badlogic.gdx.physics.box2d.Body;
 import com.badlogic.gdx.physics.box2d.Fixture;
 import com.badlogic.gdx.physics.box2d.Manifold;
 import com.badlogic.gdx.physics.box2d.World;
+import com.badlogic.gdx.graphics.Color;
 import com.rivalesfc.game.Constants;
 import com.rivalesfc.game.GameMode;
+import com.rivalesfc.game.MatchSetup;
 import com.rivalesfc.game.Settings;
 import com.rivalesfc.game.ai.SupportAI;
 import com.rivalesfc.game.entities.Ball;
@@ -134,14 +136,14 @@ public class MatchSimulation implements ContactListener {
         field = new Field(world);
         ball = new Ball(world, new Vector2(0, 0));
 
-        playerLeft = new PlayerEntity(world, new Vector2(Constants.KICKOFF_LEFT_X, 0), Constants.TEAM_LEFT_COLOR);
-        playerRight = new PlayerEntity(world, new Vector2(Constants.KICKOFF_RIGHT_X, 0), Constants.TEAM_RIGHT_COLOR);
+        playerLeft = new PlayerEntity(world, new Vector2(Constants.KICKOFF_LEFT_X, 0), new Color(MatchSetup.leftColor()));
+        playerRight = new PlayerEntity(world, new Vector2(Constants.KICKOFF_RIGHT_X, 0), new Color(MatchSetup.rightColor()));
         playerRight.humanControlled = mode != GameMode.ONE_PLAYER;
 
         float halfFieldWidth = Constants.FIELD_WIDTH / 2f;
         float patrolRange = Constants.GOAL_WIDTH / 2f - Constants.PLAYER_RADIUS;
-        keeperLeft = new GoalkeeperEntity(world, -halfFieldWidth + Constants.GK_LINE_OFFSET, patrolRange, Constants.TEAM_LEFT_COLOR);
-        keeperRight = new GoalkeeperEntity(world, halfFieldWidth - Constants.GK_LINE_OFFSET, patrolRange, Constants.TEAM_RIGHT_COLOR);
+        keeperLeft = new GoalkeeperEntity(world, -halfFieldWidth + Constants.GK_LINE_OFFSET, patrolRange, new Color(MatchSetup.leftColor()));
+        keeperRight = new GoalkeeperEntity(world, halfFieldWidth - Constants.GK_LINE_OFFSET, patrolRange, new Color(MatchSetup.rightColor()));
 
         for (int i = 0; i < ring.length; i++) {
             ring[i] = new ReplayFrame();
@@ -254,6 +256,13 @@ public class MatchSimulation implements ContactListener {
                     resetKickoffPositions();
                     phase = Phase.HALFTIME;
                     phaseTimer = Constants.HALFTIME_BREAK_SECONDS;
+                } else if (half == 2 && scoreLeft == scoreRight) {
+                    // MK6: empate al final del segundo tiempo -> tiempo extra con gol de oro.
+                    half = 3;
+                    halfTimeRemaining = Constants.OVERTIME_SECONDS;
+                    resetKickoffPositions();
+                    phase = Phase.KICKOFF;
+                    phaseTimer = Constants.KICKOFF_FREEZE_SECONDS;
                 } else {
                     phase = Phase.FULL_TIME;
                 }
@@ -276,6 +285,8 @@ public class MatchSimulation implements ContactListener {
                     phase = Phase.REPLAY;
                     replayCursor = 0f;
                     phaseTimer = replayFrames.length * Constants.SIM_STEP / Constants.REPLAY_SPEED;
+                } else if (half == 3) {
+                    phase = Phase.FULL_TIME; // MK6: gol de oro, se terminó
                 } else {
                     phase = Phase.KICKOFF;
                     phaseTimer = Constants.KICKOFF_FREEZE_SECONDS;
@@ -381,9 +392,21 @@ public class MatchSimulation implements ContactListener {
         keeperRight.setReplayDive(f.krDive);
     }
 
+    /** MK6: copia los colores de equipo actuales de MatchSetup a los cuatro personajes (cuando llega la identidad del rival online). */
+    public void refreshTeamColors() {
+        playerLeft.teamColor.set(MatchSetup.leftColor());
+        playerRight.teamColor.set(MatchSetup.rightColor());
+        keeperLeft.color.set(MatchSetup.leftColor());
+        keeperRight.color.set(MatchSetup.rightColor());
+    }
+
     private void endReplay() {
         resetKickoffPositions();
         replayFrames = null;
+        if (half == 3) {
+            phase = Phase.FULL_TIME; // MK6: gol de oro, se terminó
+            return;
+        }
         phase = Phase.KICKOFF;
         phaseTimer = Constants.KICKOFF_FREEZE_SECONDS;
     }
@@ -540,10 +563,10 @@ public class MatchSimulation implements ContactListener {
     private void registerGoal(boolean leftTeamScored) {
         if (leftTeamScored) {
             scoreLeft++;
-            lastGoalMessage = "GOL de " + Constants.PLAYER_LEFT_NAME + " (AZUL)";
+            lastGoalMessage = "GOL de " + MatchSetup.leftName + " (" + MatchSetup.leftTeam.name + ")";
         } else {
             scoreRight++;
-            lastGoalMessage = "GOL de " + Constants.PLAYER_RIGHT_NAME + " (ROJO)";
+            lastGoalMessage = "GOL de " + MatchSetup.rightName + " (" + MatchSetup.rightTeam.name + ")";
         }
         lastGoalByLeft = leftTeamScored;
         lastShotOnTargetTeam = -1;
@@ -712,8 +735,8 @@ public class MatchSimulation implements ContactListener {
         remotePossessionLeft = s.possessionLeft;
         lastGoalByLeft = s.lastGoalByLeft;
         lastGoalMessage = s.lastGoalByLeft
-                ? "GOL de " + Constants.PLAYER_LEFT_NAME + " (AZUL)"
-                : "GOL de " + Constants.PLAYER_RIGHT_NAME + " (ROJO)";
+                ? "GOL de " + MatchSetup.leftName + " (" + MatchSetup.leftTeam.name + ")"
+                : "GOL de " + MatchSetup.rightName + " (" + MatchSetup.rightTeam.name + ")";
 
         ball.body.setTransform(s.ballX, s.ballY, s.ballAngle);
         ball.body.setLinearVelocity(s.ballVX, s.ballVY);

@@ -1,6 +1,8 @@
 package com.rivalesfc.game;
 
 import com.badlogic.gdx.Game;
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.Texture;
 import com.rivalesfc.game.screens.LobbyScreen;
 
 /**
@@ -15,9 +17,26 @@ import com.rivalesfc.game.screens.LobbyScreen;
  */
 public class RivalesFCGame extends Game {
 
+    /** MK6: logo del club (assets/logo.png), compartido por el lobby y el HUD del partido. Puede ser null si falta el archivo. */
+    public Texture logo;
+
     @Override
     public void create() {
         Settings.load();
+        try {
+            logo = new Texture(Gdx.files.internal("logo.png"), true); // MK7: con mipmaps, se reduce sin dentado
+            logo.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+        } catch (RuntimeException e) {
+            logo = null; // sin logo el juego funciona igual
+        }
         setScreen(new LobbyScreen(this));
+    }
+
+    @Override
+    public void dispose() {
+        super.dispose();
+        if (logo != null) {
+            logo.dispose();
+        }
     }
 }

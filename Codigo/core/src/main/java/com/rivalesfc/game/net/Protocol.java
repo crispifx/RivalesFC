@@ -82,6 +82,57 @@ public final class Protocol {
         return true;
     }
 
+    // ------------------------------------------------------------------
+    // MK6: identidad del jugador (equipo elegido + nombre). Cuerpo OPCIONAL de HELLO/WELCOME:
+    // si falta (cliente/host sin identidad) se ignora, así que la versión del protocolo no cambia.
+    // Formato: team (byte) + largo del nombre (byte) + nombre en UTF-8.
+    // ------------------------------------------------------------------
+
+    public static final int MAX_NAME_LEN = 12;
+
+    /** Deja el nombre en mayúsculas, solo letras/números/espacio/guion y de hasta {@link #MAX_NAME_LEN} caracteres. */
+    public static String cleanName(String raw) {
+        if (raw == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < raw.length() && sb.length() < MAX_NAME_LEN; i++) {
+            char c = Character.toUpperCase(raw.charAt(i));
+            if (Character.isLetterOrDigit(c) || c == ' ' || c == '-' || c == '_') {
+                sb.append(c);
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    public static void writeIdentity(ByteBuffer b, int team, String name) {
+        byte[] n = cleanName(name).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        int len = Math.min(n.length, 40);
+        b.put((byte) team);
+        b.put((byte) len);
+        b.put(n, 0, len);
+    }
+
+    /** Lee la identidad si el paquete la trae; devuelve null si no hay (o está incompleta). */
+    public static Identity readIdentity(ByteBuffer b) {
+        if (b.remaining() < 2) return null;
+        int team = b.get();
+        int len = b.get() & 0xFF;
+        if (len > 40 || b.remaining() < len) return null;
+        byte[] n = new byte[len];
+        b.get(n);
+        return new Identity(team, cleanName(new String(n, java.nio.charset.StandardCharsets.UTF_8)));
+    }
+
+    /** Equipo (índice en la lista de equipos del juego) y nombre de un jugador. */
+    public static final class Identity {
+        public final int team;
+        public final String name;
+
+        public Identity(int team, String name) {
+            this.team = team;
+            this.name = name;
+        }
+    }
+
     /** Cuerpo de PING: marca de tiempo local (ms, puede dar la vuelta al int) + último ping medido. */
     public static void writePing(ByteBuffer b, int stampMs, int lastPingMs) {
         b.putInt(stampMs);

@@ -1,3 +1,33 @@
+# Rivales F.C. — MK7: gráficos suaves (adiós al pixelado)
+
+> ## Novedades de la MK7 (solo visual; no cambia la jugabilidad ni el protocolo online)
+>
+> **Por qué se veía pixelado:** los jugadores eran sprites de 20x32 px y la pelota de 20x20, ampliados con filtro *Nearest* a una escala no entera; el pasto y la tribuna eran texturas minúsculas estiradas por toda la cancha (de ahí las rayitas verticales raras); las líneas de la cancha eran de 1 px sin suavizado; y la fuente era la Arial de 15 px de LibGDX, ampliada y sin algunos símbolos (el cuadradito en "MK6 — elegí").
+>
+> - **Arte en alta resolución con antialiasing** (`gfx/SoftCanvas`, `gfx/ArtPainter`, Java puro sin LibGDX): jugadores y arqueros de 120x192 con contorno, sombreado, cara, pelo y guantes; pelota de 160x160 con volumen y brillo; todo se suaviza por supermuestreo y se sube con **filtro trilineal + mipmaps** (`PixelArtFactory`), así que se ve bien a cualquier zoom.
+> - **Cancha completa en una textura de 32 px/m:** pasto con rayas (10, el cambio cae en la línea central), manchas, hebras y grano; **líneas con bordes suaves** calculadas por distancia analítica (contorno, medio campo, círculo, áreas, puntos y medialunas, arcos de córner); arcos con red y postes; carteles publicitarios negro/dorado. Se cachea entre partidos.
+> - **Tribuna real:** público sentado en 4 filas, con hinchas festejando, bufandas y profundidad; en vez de una textura de 24x2 celdas estirada. La de abajo va espejada para que el fondo quede siempre lejos de la cancha.
+> - **Sombras suaves** bajo jugadores, arqueros y pelota; **anillo elíptico** suave para tu jugador (antes un círculo de 1 px).
+> - **Fuente nítida** (`gfx/Fonts`): se genera con FreeType desde `assets/font.ttf` (Barlow Condensed Bold, licencia OFL en `assets/FONT_LICENSE_OFL.txt`) a 64 px con mipmaps. Trae á é í ó ú ü ñ ¡ ¿ — · y demás. Todo `setScale(x)` del código pasó a `setScale((x) * Fonts.K)`. Si FreeType o la fuente no cargan, usa la de respaldo suavizada y el juego arranca igual.
+> - **Antialiasing MSAA 4x** (`DesktopLauncher`) para círculos, reloj y bordes del HUD; el logo usa mipmaps; el blur del rival se adaptó a la textura más grande.
+> - **Arreglo de paso:** los carteles de nombre sobre los jugadores no se veían (con la fuente por defecto, el redondeo a píxeles enteros los colapsaba al dibujarlos en metros). Ahora `setUseIntegerPositions(false)` y se ven.
+> - **Arreglo de paso:** los arcos de córner estaban dibujados hacia afuera de la cancha; ahora van hacia adentro.
+> - **Nueva dependencia:** `gdx-freetype` y `gdx-freetype-platform:natives-desktop` (ya agregadas en `build.gradle`); Gradle las baja solo.
+> - **Sin compilar contra LibGDX:** el arte (`SoftCanvas`/`ArtPainter`) se compiló y se probó como Java puro (previsualizado como imágenes); `Fonts` y `PixelArtFactory` se verificaron contra stubs de la API; `MatchScreen`/`LobbyScreen`/`DesktopLauncher` se revisaron de sintaxis pero **no se compilaron con LibGDX**. Probar en partida; si algo no compila, el error va a estar en esas pocas líneas.
+> - **Ajustes rápidos:** tamaño de letra = `Fonts.TARGET_SIZE`; nitidez del suelo = `PixelArtFactory.GROUND_PPM`; colores del pasto y cantidad de rayas en `ArtPainter.ground`.
+
+# Rivales F.C. — MK6: gol de oro y HUD pulido
+
+> ## Novedades de la MK6 (cambios chicos sobre la MK5)
+>
+> - **Tiempo extra con gol de oro:** si el segundo tiempo termina empatado se juegan 60 s extra (`Constants.OVERTIME_SECONDS`); el primer gol gana (festejo + repetición y fin). Si nadie convierte, queda empate. Online funciona sin cambiar el protocolo (usa `half = 3`).
+> - **HUD:** porcentaje de posesión a cada lado de la barra; el reloj se pone rojo y titila en los últimos 10 s; la etiqueta de fase dice `GOLDEN GOAL` en el tiempo extra y el saque muestra "TIEMPO EXTRA - GOL DE ORO"; barrita de recarga del planchazo bajo tu jugador (no se muestra en el cliente online, donde ese dato no se sincroniza); el ping online ahora tiene fondo y un punto de color.
+> - **Logo del club** (`assets/logo.png`, más `icon16/32/64/128.png`): icono de la ventana (`DesktopLauncher`), cabecera del lobby (franja negra con el logo) y esquina derecha de la barra superior del partido. Si falta `logo.png` el juego arranca igual con el título de texto.
+> - **Registro de goles en el HUD:** los últimos 3 goles ("AZUL 1:23") arriba a la izquierda de la barra, también en el cliente online.
+> - **Elegir equipo y nombre (lobby):** filas nuevas `TU NOMBRE` (se escribe; hasta 12 caracteres, mayúsculas), `TU EQUIPO` y `EQUIPO RIVAL` (8 equipos: azul, rojo, verde, amarillo, naranja, violeta, blanco, rosa; ver `Team.java`). Se guardan entre sesiones. El equipo cambia la camiseta, el color del nombre, la estela, el arquero, el marcador, el registro de goles, los carteles de gol y la pantalla final. Contra la IA el rival se llama `CPU`; en 2 jugadores el segundo es `JUGADOR 2`. Si elegís el mismo equipo para los dos lados, el de la derecha pasa al siguiente.
+> - **Online:** el HELLO/WELCOME ahora lleva (opcional) equipo + nombre de cada uno, así que cada jugador ve al rival con su equipo y nombre reales. No cambia la versión del protocolo (sin ese dato el rival se ve con valores por defecto). `NetSelfTest` pasó a 30 pruebas, todas OK por loopback.
+> - **Sin compilar:** igual que la MK5, estos cambios se revisaron a mano pero no se compilaron (sin LibGDX en el entorno). Probar en partida: empatar a propósito para ver el tiempo extra.
+
 # Rivales F.C. — MK5: online más suave, con ping y revancha
 
 > ## Balance de la MK5 (jugabilidad)

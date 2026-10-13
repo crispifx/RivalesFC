@@ -53,7 +53,7 @@ public final class BlurShader {
                     + "      float fx = float(x);\n"
                     + "      float fy = float(y);\n"
                     + "      float w = exp(-(fx * fx + fy * fy) / 4.0);\n"
-                    + "      vec4 s = texture2D(u_texture, v_texCoords + vec2(fx, fy) * u_texel * u_radius);\n"
+                    + "      vec4 s = texture2D(u_texture, v_texCoords + vec2(fx, fy) * u_texel * u_radius, 1.5);\n"
                     + "      rgb += s.rgb * s.a * w;\n"
                     + "      a += s.a * w;\n"
                     + "      total += w;\n"
