@@ -2,17 +2,6 @@ package com.rivalesfc.game.gfx;
 
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 
-/**
- * Desenfoque real por shader (MK4), en reemplazo del "desenfoque barato" de capas
- * translúcidas de las etapas anteriores. Se activa sobre el {@code SpriteBatch}
- * ({@code batch.setShader(...)}) solo mientras se dibuja al rival, así que no hace
- * falta un FrameBuffer: el blur se calcula por sprite, muestreando vecinos del
- * texel (kernel gaussiano 5x5) con promedio ponderado por alfa (así los bordes
- * transparentes no oscurecen el resultado).
- *
- * Si el driver no compila el shader, {@link #create()} devuelve null y la pantalla
- * usa el desenfoque por capas como respaldo.
- */
 public final class BlurShader {
 
     private BlurShader() {
@@ -63,7 +52,6 @@ public final class BlurShader {
                     + "  gl_FragColor = v_color * vec4(outRgb, a / total);\n"
                     + "}\n";
 
-    /** @return el shader compilado, o null si el hardware/driver no lo soporta. */
     public static ShaderProgram create() {
         ShaderProgram.pedantic = false;
         ShaderProgram program = new ShaderProgram(VERT, FRAG);

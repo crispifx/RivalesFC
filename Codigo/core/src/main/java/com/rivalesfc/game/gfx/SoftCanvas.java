@@ -1,31 +1,14 @@
 package com.rivalesfc.game.gfx;
 
-/**
- * Rasterizador vectorial por software (Java puro, sin LibGDX) con antialiasing.
- *
- * Reemplaza al dibujo con {@code Pixmap.fillRectangle/fillCircle} de la MK6, que
- * producía bordes dentados. Cada forma se define como un campo de distancia con
- * signo (SDF); el borde se suaviza con cobertura analítica y la imagen final se
- * reduce desde una grilla supermuestreada. Todas las coordenadas se expresan en
- * píxeles de la imagen FINAL (con decimales), el supermuestreo es interno.
- *
- * Al no depender de LibGDX se puede probar y previsualizar fuera del juego.
- */
 public final class SoftCanvas {
 
-    // ------------------------------------------------------------------
-    // Formas (campos de distancia con signo: negativo = adentro)
-    // ------------------------------------------------------------------
-
     public interface Shape {
-        /** Distancia con signo al borde de la forma, en píxeles finales. */
+
         float dist(float x, float y);
 
-        /** Caja que contiene la forma: {minX, minY, maxX, maxY}. */
         void bounds(float[] out);
     }
 
-    /** Color por posición (ARGB sin premultiplicar). */
     public interface Paint {
         int argb(float x, float y);
     }
@@ -60,7 +43,6 @@ public final class SoftCanvas {
         return ellipse(cx, cy, r, r);
     }
 
-    /** Rectángulo redondeado centrado en (cx,cy) con semiancho hw, semialto hh y radio de esquina r. */
     public static Shape roundRect(final float cx, final float cy, final float hw, final float hh, final float r0) {
         final float r = Math.min(r0, Math.min(hw, hh));
         return new Shape() {
@@ -83,7 +65,6 @@ public final class SoftCanvas {
         };
     }
 
-    /** Cápsula (segmento con grosor) con radio r1 en el primer extremo y r2 en el segundo. */
     public static Shape capsule(final float x1, final float y1, final float x2, final float y2,
                                 final float r1, final float r2) {
         return new Shape() {
@@ -112,7 +93,6 @@ public final class SoftCanvas {
         };
     }
 
-    /** Polígono (pares x,y), distancia exacta a las aristas y signo por par-impar. */
     public static Shape polygon(final float... pts) {
         final int n = pts.length / 2;
         return new Shape() {
@@ -164,7 +144,6 @@ public final class SoftCanvas {
         };
     }
 
-    /** a menos b. */
     public static Shape minus(final Shape a, final Shape b) {
         return new Shape() {
             @Override
@@ -179,7 +158,6 @@ public final class SoftCanvas {
         };
     }
 
-    /** Intersección de a y b. */
     public static Shape intersect(final Shape a, final Shape b) {
         return new Shape() {
             @Override
@@ -200,10 +178,6 @@ public final class SoftCanvas {
         };
     }
 
-    // ------------------------------------------------------------------
-    // Colores y pinturas
-    // ------------------------------------------------------------------
-
     public static int argb(float r, float g, float b, float a) {
         return (clamp8(a) << 24) | (clamp8(r) << 16) | (clamp8(g) << 8) | clamp8(b);
     }
@@ -217,7 +191,6 @@ public final class SoftCanvas {
         return i < 0 ? 0 : (i > 255 ? 255 : i);
     }
 
-    /** Multiplica el RGB por f (>1 aclara, <1 oscurece), conserva el alfa. */
     public static int shade(int c, float f) {
         int a = c >>> 24;
         int r = Math.min(255, Math.max(0, Math.round(((c >> 16) & 255) * f)));
@@ -248,7 +221,6 @@ public final class SoftCanvas {
         };
     }
 
-    /** Degradé vertical entre y0 (color c0) e y1 (color c1). */
     public static Paint vgrad(final float y0, final int c0, final float y1, final int c1) {
         return new Paint() {
             @Override
@@ -258,7 +230,6 @@ public final class SoftCanvas {
         };
     }
 
-    /** Degradé horizontal entre x0 (color c0) y x1 (color c1). */
     public static Paint hgrad(final float x0, final int c0, final float x1, final int c1) {
         return new Paint() {
             @Override
@@ -268,7 +239,6 @@ public final class SoftCanvas {
         };
     }
 
-    /** Degradé radial: color c0 en el centro, c1 a distancia r. */
     public static Paint radial(final float cx, final float cy, final float r, final int c0, final int c1) {
         return new Paint() {
             @Override
@@ -280,16 +250,12 @@ public final class SoftCanvas {
         };
     }
 
-    // ------------------------------------------------------------------
-    // Lienzo
-    // ------------------------------------------------------------------
-
     public final int width;
     public final int height;
     private final int ss;
     private final int bigW;
     private final int bigH;
-    /** RGBA premultiplicado, bigW*bigH*4. */
+
     private final float[] buf;
     private final float[] bb = new float[4];
 
@@ -302,22 +268,18 @@ public final class SoftCanvas {
         this.buf = new float[bigW * bigH * 4];
     }
 
-    /** Rellena la forma con la pintura. */
     public void fill(Shape s, Paint p) {
         raster(s, p, 0f);
     }
 
-    /** Rellena la forma con un color sólido. */
     public void fill(Shape s, int color) {
         raster(s, solid(color), 0f);
     }
 
-    /** Dibuja un contorno de grosor {@code w} hacia afuera (llamar ANTES de {@link #fill}). */
     public void outline(Shape s, float w, int color) {
         raster(s, solid(color), w);
     }
 
-    /** Contorno + relleno. */
     public void fillOutlined(Shape s, Paint p, float w, int outlineColor) {
         raster(s, solid(outlineColor), w);
         raster(s, p, 0f);
@@ -361,11 +323,6 @@ public final class SoftCanvas {
         }
     }
 
-    /**
-     * Reduce a la resolución final y devuelve ARGB sin premultiplicar. Los píxeles
-     * totalmente transparentes llevan {@code bleedColor} como RGB, para que el filtro
-     * bilineal/mipmaps de la GPU no dibuje un halo de otro color en los bordes.
-     */
     public int[] toArgb(int bleedColor) {
         int[] out = new int[width * height];
         float n = ss * ss;

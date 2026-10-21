@@ -10,10 +10,6 @@ import com.badlogic.gdx.physics.box2d.PolygonShape;
 import com.badlogic.gdx.physics.box2d.World;
 import com.rivalesfc.game.Constants;
 
-/**
- * Cancha reglamentaria simplificada: cuatro bordes (con dos huecos para los arcos)
- * y dos sensores de gol. Todo estático, sin body dinámico.
- */
 public class Field {
 
     public final float width = Constants.FIELD_WIDTH;
@@ -38,19 +34,22 @@ public class Field {
         float halfH = height / 2f;
         float goalHalf = Constants.GOAL_WIDTH / 2f;
 
-        // Borde superior e inferior (completos)
-        addEdge(body, -halfW, halfH, halfW, halfH);
-        addEdge(body, -halfW, -halfH, halfW, -halfH);
+        float c = Constants.FIELD_CORNER_CUT;
 
-        // Borde izquierdo, con hueco para el arco
-        addEdge(body, -halfW, halfH, -halfW, goalHalf);
-        addEdge(body, -halfW, -goalHalf, -halfW, -halfH);
+        addEdge(body, -halfW + c, halfH, halfW - c, halfH);
+        addEdge(body, -halfW + c, -halfH, halfW - c, -halfH);
 
-        // Borde derecho, con hueco para el arco
-        addEdge(body, halfW, halfH, halfW, goalHalf);
-        addEdge(body, halfW, -goalHalf, halfW, -halfH);
+        addEdge(body, -halfW, halfH - c, -halfW + c, halfH);
+        addEdge(body, halfW - c, halfH, halfW, halfH - c);
+        addEdge(body, -halfW, -halfH + c, -halfW + c, -halfH);
+        addEdge(body, halfW - c, -halfH, halfW, -halfH + c);
 
-        // "Fondo" del arco (para que la pelota no siga viajando al infinito tras el gol)
+        addEdge(body, -halfW, halfH - c, -halfW, goalHalf);
+        addEdge(body, -halfW, -goalHalf, -halfW, -halfH + c);
+
+        addEdge(body, halfW, halfH - c, halfW, goalHalf);
+        addEdge(body, halfW, -goalHalf, halfW, -halfH + c);
+
         addEdge(body, -halfW - Constants.GOAL_DEPTH, goalHalf, -halfW - Constants.GOAL_DEPTH, -goalHalf);
         addEdge(body, halfW + Constants.GOAL_DEPTH, goalHalf, halfW + Constants.GOAL_DEPTH, -goalHalf);
         addEdge(body, -halfW - Constants.GOAL_DEPTH, goalHalf, -halfW, goalHalf);

@@ -3,39 +3,32 @@ package com.rivalesfc.game;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Preferences;
 
-/**
- * Opciones del jugador (MK4). Se eligen en el lobby y se guardan con
- * {@link Preferences} de libGDX (un archivo chico en la carpeta del usuario),
- * así que sobreviven entre sesiones. Es estado global a propósito: la
- * simulación, la IA y la pantalla las leen sin tener que pasarlas por parámetro.
- */
 public final class Settings {
 
     private Settings() {
     }
 
-    /** Dificultad: afecta a la IA de soporte (modo 1 jugador) y a los dos arqueros. */
     public enum Difficulty {
-        //        etiqueta  mov.   sprint  jitter tiro   arquero: vel.  reflejo dive%  error
+
         EASY("FACIL",       0.80f,  8.0f,   1.40f, 11f,   0.85f, 1.50f, 0.50f, 1.20f),
         NORMAL("NORMAL",    0.92f,  3.5f,   0.70f, 14f,   1.00f, 1.00f, 0.75f, 0.60f),
         HARD("DIFICIL",     1.00f,  2.5f,   0.25f, 17f,   1.10f, 0.70f, 0.92f, 0.25f);
 
         public final String label;
-        /** Escala del eje de movimiento de la IA (1 = a fondo). */
+
         public final float aiMoveScale;
-        /** Distancia a la pelota a partir de la cual la IA usa sprint. */
+
         public final float aiSprintDist;
-        /** Error de puntería de la IA, en metros sobre la línea de gol. */
+
         public final float aiAimJitter;
-        /** Distancia al arco rival desde la que la IA se anima a rematar. */
+
         public final float aiShootRange;
         public final float gkSpeedScale;
-        /** Multiplicador del tiempo de reacción del arquero (menor = más rápido). */
+
         public final float gkReactionScale;
-        /** Probabilidad de que el arquero decida tirarse en un remate al arco. */
+
         public final float gkDiveChance;
-        /** Error (metros) con el que el arquero estima adónde va la pelota. */
+
         public final float gkDiveNoise;
 
         Difficulty(String label, float aiMoveScale, float aiSprintDist, float aiAimJitter, float aiShootRange,
@@ -56,12 +49,12 @@ public final class Settings {
 
     public static Difficulty difficulty = Difficulty.NORMAL;
     public static int halfMinutes = 3;
-    /** Volumen maestro 0..1 (pasos de 0.1). */
+
     public static float volume = 0.8f;
     public static boolean muted = false;
-    /** Última IP de host escrita en el lobby para unirse online. */
+
     public static String lastHostIp = "";
-    /** MK6: nombre del jugador (se muestra sobre el personaje y en los carteles) y equipos elegidos (índices de {@link Team#ALL}). */
+
     public static String playerName = "JUGADOR";
     public static int teamIndex = 0;
     public static int rivalTeamIndex = 1;
@@ -72,7 +65,6 @@ public final class Settings {
         return halfMinutes * 60f;
     }
 
-    /** Volumen efectivo para reproducir un sonido con {@code base} de volumen propio. */
     public static float sfx(float base) {
         return muted ? 0f : base * volume;
     }
@@ -96,7 +88,7 @@ public final class Settings {
             teamIndex = Math.floorMod(p.getInteger("teamIndex", 0), Team.ALL.length);
             rivalTeamIndex = Math.floorMod(p.getInteger("rivalTeamIndex", 1), Team.ALL.length);
         } catch (Exception e) {
-            // Sin preferencias legibles: se queda con los valores por defecto.
+
         }
     }
 
@@ -113,7 +105,7 @@ public final class Settings {
             p.putInteger("rivalTeamIndex", rivalTeamIndex);
             p.flush();
         } catch (Exception e) {
-            // No es crítico si no se puede guardar.
+
         }
     }
 }

@@ -1,16 +1,9 @@
 package com.rivalesfc.game.net;
 
-/**
- * Foto del estado del partido que el host manda al cliente (30 veces por segundo).
- * Es solo datos: no depende de LibGDX. Índices: 0 = jugador/equipo AZUL (host), 1 = ROJO (cliente).
- *
- * Los eventos de un solo disparo (sonido de pateo, planchazo, atajada) viajan como
- * CONTADORES: si un paquete se pierde, el cliente igual nota que el contador subió.
- */
 public class Snapshot {
 
     public int tick;
-    public byte phase;      // ordinal de MatchSimulation.Phase
+    public byte phase;
     public byte half;
     public byte scoreLeft;
     public byte scoreRight;

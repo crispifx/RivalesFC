@@ -11,19 +11,6 @@ import com.badlogic.gdx.physics.box2d.World;
 import com.rivalesfc.game.Constants;
 import com.rivalesfc.game.Settings;
 
-/**
- * Arquero 100% IA (nunca recibe input humano). Body cinemático de Box2D que
- * solo se mueve en vertical sobre la línea de su arco.
- *
- * MK4: ahora tiene dos estados —
- *   TRACK: sigue la coordenada Y de la pelota con tiempo de reacción (como en MK2/MK3).
- *   DIVE : "estirada". Si la pelota viaja hacia el arco, la trayectoria (recta) cruza
- *          la boca del arco y el arquero no llega caminando, decide tirarse tras un
- *          reflejo corto, hacia el punto estimado (con un error que depende de la
- *          dificultad), a {@link Constants#GK_DIVE_SPEED}. Después queda en recarga.
- * Como el body es cinemático, seguir siendo imposible empujarlo: solo desvía la
- * pelota por contacto, y la detección de "atajada" la hace MatchSimulation.
- */
 public class GoalkeeperEntity {
 
     public final Body body;
@@ -31,7 +18,7 @@ public class GoalkeeperEntity {
     private final float fixedX;
     private final float patrolHalfRange;
     private final float diveHalfRange;
-    /** Hacia dónde queda el interior de la cancha desde este arco: +1 (arco izquierdo) o -1 (arco derecho). */
+
     private final float inward;
 
     private float trackedBallY = 0f;
@@ -41,12 +28,11 @@ public class GoalkeeperEntity {
     private float diveCooldown = 0f;
     private float diveTargetY = 0f;
     private float diveSign = 0f;
-    /** Cuenta regresiva del reflejo; negativa = todavía no hay remate que evaluar. */
+
     private float decisionTimer = -1f;
     private float plannedTargetY = 0f;
     private boolean decisionMade = false;
 
-    /** -1..1: signo de la estirada por su progreso (0 = no se está tirando). Lo usa el render. */
     private float visualDive = 0f;
 
     public GoalkeeperEntity(World world, float fixedX, float patrolHalfRange, Color color) {
@@ -73,13 +59,6 @@ public class GoalkeeperEntity {
         shape.dispose();
     }
 
-    /**
-     * Una vez por tick (30 Hz).
-     *
-     * @param ballPos posición de la pelota
-     * @param ballVel velocidad de la pelota (para anticipar remates)
-     * @param canDive false fuera de juego (cuenta regresiva, festejo, etc.)
-     */
     public void update(Vector2 ballPos, Vector2 ballVel, float dt, boolean canDive) {
         Settings.Difficulty diff = Settings.difficulty;
         if (diveCooldown > 0f) {
@@ -92,7 +71,6 @@ public class GoalkeeperEntity {
         }
         visualDive = 0f;
 
-        // --- TRACK ---
         float desired = MathUtils.clamp(ballPos.y, -patrolHalfRange, patrolHalfRange);
         float lag = MathUtils.clamp(dt / (Constants.GK_REACTION_TIME * diff.gkReactionScale), 0f, 1f);
         trackedBallY = MathUtils.lerp(trackedBallY, desired, lag);
@@ -111,10 +89,9 @@ public class GoalkeeperEntity {
         }
     }
 
-    /** ¿Viene un remate al arco que no llego a cubrir caminando? Si sí, tras el reflejo, tirarse. */
     private void evaluateShot(Vector2 ballPos, Vector2 ballVel, float dt, Settings.Difficulty diff) {
-        float distIn = (ballPos.x - fixedX) * inward;              // >0: la pelota está delante del arquero
-        float speedToGoal = -ballVel.x * inward;                   // >0: se acerca al arco
+        float distIn = (ballPos.x - fixedX) * inward;
+        float speedToGoal = -ballVel.x * inward;
         boolean incoming = distIn > 0f && distIn < Constants.GK_DIVE_TRIGGER_DIST
                 && speedToGoal > Constants.GK_DIVE_MIN_BALL_SPEED;
         if (!incoming || diveCooldown > 0f) {
@@ -124,7 +101,7 @@ public class GoalkeeperEntity {
         }
 
         float t = distIn / speedToGoal;
-        float yPred = ballPos.y + ballVel.y * t;                   // trayectoria recta (sin rebotes)
+        float yPred = ballPos.y + ballVel.y * t;
         boolean onTarget = Math.abs(yPred) < Constants.GOAL_WIDTH / 2f + 0.3f;
         float myY = body.getPosition().y;
         if (!onTarget || Math.abs(yPred - myY) < Constants.GK_DIVE_MIN_MISS) {
@@ -145,7 +122,7 @@ public class GoalkeeperEntity {
                         -diveHalfRange, diveHalfRange);
                 startDive(plannedTargetY);
             } else {
-                diveCooldown = 0.8f; // "se durmió": no se tira en este remate
+                diveCooldown = 0.8f;
             }
         }
     }
@@ -176,7 +153,6 @@ public class GoalkeeperEntity {
         visualDive = diveSign * Math.max(0.35f, MathUtils.sin(progress * MathUtils.PI));
     }
 
-    /** Aplica velocidad vertical sin dejar que el body salga del rango permitido del arco. */
     private void setVerticalVelocity(float vy, float dt) {
         float nextY = body.getPosition().y + vy * dt;
         if (nextY > diveHalfRange && vy > 0f) {
@@ -195,17 +171,14 @@ public class GoalkeeperEntity {
         return diving;
     }
 
-    /** -1..1: signo de la estirada por su intensidad actual (0 si no se está tirando). */
     public float getVisualDive() {
         return visualDive;
     }
 
-    /** Solo para el cliente online: refleja si el host dice que el arquero se está tirando (para el sonido). */
     public void setRemoteDiving(boolean value) {
         diving = value;
     }
 
-    /** Solo para la repetición: fuerza el estado visual sin tocar la IA. */
     public void setReplayDive(float value) {
         visualDive = value;
     }

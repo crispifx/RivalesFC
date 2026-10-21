@@ -1,4 +1,52 @@
-# Rivales F.C. — MK7: gráficos suaves (adiós al pixelado)
+# Rivales F.C. — MK7: visibilidad y arreglos de jugabilidad
+
+> ## 2 vs 2 local, 4 jugadores y mandos (nuevo en la MK7)
+>
+> Desde el lobby, la tarjeta de la fila 3 alterna con **← →** entre **2 VS 2 COOPERATIVO** y **4 JUGADORES (2 VS 2)**. La tecla `3` arranca el cooperativo y la `4` el de 4 jugadores. Cámara única a pantalla completa, solo local.
+>
+> **2 VS 2 COOPERATIVO:** dos compañeros en el mismo equipo (azul) contra un equipo rojo de dos jugadores de IA.
+> - **J1:** WASD mover, Shift correr, Espacio cargar/patear, Ctrl izq. planchazo.
+> - **J2 (anillo celeste), dos esquemas a elección que se pueden usar a la vez:** Flechas + Ctrl der. correr + Enter cargar/patear + Shift der. planchazo, **o** `I J K L` + `N` correr + `,` cargar/patear + `.` planchazo. Sirve si el teclado no registra todas las teclas juntas o no tiene Ctrl derecho. La `M` queda libre para silenciar.
+> - **La IA del rojo se reparte los roles:** el más cercano a la pelota la presiona (con histéresis de 2 m) y el otro apoya (adelante y del lado contrario) o cubre (entre la pelota y su arco). Medido: se mantienen a ~7 m uno del otro.
+> - **Cámara:** apunta al punto medio de los dos compañeros inclinada 45 % hacia la pelota, con 24 m de alto (casi toda la cancha). El minimapa muestra los cuatro; el punto celeste es J2.
+> - Repetición de gol, reposicionamiento, estadísticas y pelota trabada funcionan con los cuatro jugadores. No cambia el protocolo online.
+>
+> **4 JUGADORES (2 humanos vs 2 humanos):**
+> - **AZUL:** J1 y J2 con el teclado, igual que arriba (si hay 3er y 4to mando, también pueden usarlos).
+> - **ROJO:** J3 y J4 **con mandos** (anillos naranja y violeta; punto del mismo color en el minimapa).
+> - **Si faltan mandos, la CPU ocupa los lugares libres del rojo:** con 1 mando J3 es humano y J4 es CPU; sin mandos es el cooperativo. Si un mando se desconecta o se enchufa a mitad de partido, ese jugador pasa a CPU o vuelve a ser humano. Si un rojo es humano y el otro CPU, la CPU siempre presiona la pelota.
+> - La cámara se centra en los cuatro jugadores.
+>
+> **Mandos (todos los modos):** Xbox, PlayStation, Switch Pro y similares, sin librerías nuevas (se leen con el GLFW que ya trae LibGDX). Se pueden enchufar antes o durante el partido; si algo falla, el juego sigue con teclado.
+> - Stick izquierdo o cruceta mover, **A** (o gatillo derecho) cargar/patear, **X** planchazo, **B / LB / RB / gatillo izq.** correr, **START** pausa (y, al final del partido, volver al menú).
+> - En el lobby se navega con stick/cruceta y A.
+> - El mando 1 es del J1 y el 2 del J2 (en 1 jugador, 2 jugadores, 2v2 y online). En el modo de 4 jugadores los mandos 1 y 2 son del ROJO y el 3 y 4 del azul. El orden lo decide el sistema operativo.
+> - **Sin verificar en pantalla:** el dibujo de los cuatro jugadores, el lobby y los mandos reales; ver `INFORME_MK7.md`.
+
+> ## Qué trae la MK7 (consolida los gráficos suaves de la versión anterior + visibilidad + bugs)
+>
+> Esta vez el proyecto se **compiló y se probó con la física Box2D real, sin ventana** (ver `SimSelfTest` y `INFORME_MK7.md`).
+>
+> **Jugabilidad (bugs medidos y corregidos)**
+> - **Sprint real:** con Shift se llegaba a ~7,9 m/s en vez de 10,5 (la fuerza y el damping limitaban la velocidad). Ahora llega a ~10,5, y al soltar Shift la velocidad baja de a poco (antes frenazo seco).
+> - **Pelota trabada:** las esquinas son ochavadas (corte de 1,2 m a 45°) y, si la pelota casi no se mueve durante ~5 s, se reubica hacia adentro con un cartel y silbato.
+> - **IA que se quedaba empujando contra el muro** (0 remates y 0 goles en 3 min en dificultad NORMAL): ahora no apunta a puntos fuera de la cancha, alcanza con alinearse a 0,80 y apunta con el movimiento al soltar.
+> - **Control de pelota:** el rebote jugador-pelota baja de 0,65 a 0,12 (los arqueros y muros siguen igual). Al conducir, la pelota queda al alcance ~88 % del tiempo (antes ~52 %): al correr contra ella ya no sale disparada más rápido que vos.
+> - **R y ESC accidentales:** R solo reinicia en pausa o al final; ESC pide apretarlo dos veces durante el juego.
+> - **Frames colgados:** un frame largo (arrastrar la ventana) ya no simula decenas de ticks de golpe. Al reanudar la pausa se descartan teclas pegadas.
+>
+> **Visibilidad**
+> - **Movimiento suave:** la simulación sigue a 30 Hz pero se dibuja interpolada a 60 fps.
+> - **Pelota visible:** se dibuja ~1,8x más grande (la física no cambia), con halo claro, estela cuando va rápida y rotación según el desplazamiento.
+> - **Pantalla dividida:** vista de 20 m (antes 16) y cámara inclinada hacia la pelota y suavizada; **flecha amarilla con la distancia** cuando la pelota queda fuera del panel.
+> - **Minimapa** abajo al centro con jugadores, arqueros, pelota y el recuadro que ve cada cámara.
+> - **Línea de puntería** al cargar el tiro (misma cuenta que la simulación, incluye el ajuste por dirección) y barra de potencia más grande.
+> - **HUD escalado** según el alto de la ventana (los paneles centrales de pausa/final/red quedan a escala fija).
+> - **Quién tiene la pelota:** el anillo de tu jugador se pone amarillo cuando la tenés al alcance, y durante la cuenta regresiva del saque una flecha que rebota te marca.
+>
+> **No cambia el protocolo online.** Pruebas: `SimSelfTest` (nuevo, 30 comprobaciones) y `NetSelfTest`.
+
+## Antes: gráficos suaves (adiós al pixelado)
 
 > ## Novedades de la MK7 (solo visual; no cambia la jugabilidad ni el protocolo online)
 >

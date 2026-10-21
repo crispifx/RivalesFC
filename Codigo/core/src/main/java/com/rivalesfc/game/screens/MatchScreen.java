@@ -30,6 +30,7 @@ import com.rivalesfc.game.entities.PlayerEntity;
 import com.rivalesfc.game.gfx.MotionTrail;
 import com.rivalesfc.game.gfx.Fonts;
 import com.rivalesfc.game.gfx.PixelArtFactory;
+import com.rivalesfc.game.input.Gamepads;
 import com.rivalesfc.game.input.PlayerInput;
 import com.rivalesfc.game.net.NetClient;
 import com.rivalesfc.game.net.NetHost;
@@ -40,44 +41,6 @@ import com.rivalesfc.game.sim.MatchSimulation;
 import com.rivalesfc.game.audio.AudioFactory;
 import com.badlogic.gdx.audio.Sound;
 
-/**
- * Pantalla de partido — modo local, pantalla dividida. El lobby previo
- * ({@link LobbyScreen}) define si el panel derecho lo maneja un segundo
- * humano o una IA de soporte (modo 1 jugador). Cada mitad de la pantalla es
- * la vista de "su" jugador: la cámara de esa mitad lo sigue, y dentro de esa
- * vista el jugador rival (humano o IA) se dibuja **difuminado**, para que
- * cada uno identifique de un vistazo cuál personaje es el suyo. Los dos
- * arqueros son 100% IA y se ven nítidos en ambas mitades.
- *
- * Sobre la Etapa 1 original, esta pantalla suma la presentación estilo
- * arcade pixel-art inspirada en una referencia visual: una barra superior
- * COMPARTIDA (no duplicada por panel) con reloj, marcador "BLUE X - Y RED"
- * y título del partido; sprites de jugadores generados en runtime con
- * {@link PixelArtFactory} en lugar de círculos lisos; carteles con el
- * nombre de cada jugador; un rastro de movimiento que aparece al
- * sprintar; un planchazo/barrida; cancha con áreas, redes y tribuna
- * decorativa; y una máquina de estados de partido (cuenta regresiva de
- * saque, cartel de gol, entretiempo, fin del partido con reinicio).
- *
- * Controles:
- *   Jugador 1 (equipo AZUL, panel izquierdo)
- *     WASD          -> mover
- *     Shift izq.    -> sprint
- *     Ctrl izq.     -> planchazo/barrida
- *     Espacio (mantener y soltar) -> cargar y patear
- *
- *   Jugador 2 (equipo ROJO, panel derecho) — solo en modo 2 jugadores
- *     Flechas       -> mover
- *     Ctrl derecho  -> sprint
- *     Shift derecho -> planchazo/barrida
- *     Enter (mantener y soltar) -> cargar y patear
- *
- *   TAB -> saltear la repetición de gol (MK4)
- *   M   -> silenciar / activar sonido (MK4)
- *   F1 -> alternar visualización de debug de Box2D
- *   P  -> pausa
- *   R  -> reiniciar el partido
- */
 public class MatchScreen implements Screen {
 
     private final RivalesFCGame game;
@@ -87,20 +50,21 @@ public class MatchScreen implements Screen {
 
     private final PlayerInput inputLeft = new PlayerInput();
     private final PlayerInput inputRight = new PlayerInput();
-    private boolean kickHeldPrevLeft = false;
-    private boolean kickHeldPrevRight = false;
 
-    // --- Online 1v1: el host simula y manda snapshots; el cliente manda su input y dibuja lo recibido ---
+    private final PlayerInput inputP3 = new PlayerInput();
+    private final PlayerInput inputP4 = new PlayerInput();
+
+    private final boolean[] kickPrev = new boolean[4];
+
     private final NetHost netHost;
     private final NetClient netClient;
     private final String netAddressText;
     private final Snapshot netSnap = new Snapshot();
-    private final SnapshotInterpolator netInterp = new SnapshotInterpolator(); // MK5: suaviza al cliente
+    private final SnapshotInterpolator netInterp = new SnapshotInterpolator();
     private int netSeq = 0;
     private float netSendAccum = 0f;
     private boolean hostHadClient = false;
 
-    /** MK6: registro de goles para el HUD ("AZUL 1:23"); se arma mirando los cambios del marcador (sirve también en el cliente online). */
     private final java.util.ArrayList<String> goalLog = new java.util.ArrayList<>();
     private int goalLogLeft = 0;
     private int goalLogRight = 0;
@@ -116,12 +80,33 @@ public class MatchScreen implements Screen {
         this.netClient = netClient;
         this.netAddressText = netAddressText;
         this.sim = new MatchSimulation(mode);
+        configureSim();
     }
 
     private final OrthographicCamera camLeft = new OrthographicCamera();
     private final OrthographicCamera camRight = new OrthographicCamera();
     private final OrthographicCamera hudCam = new OrthographicCamera();
     private final Vector2 focusBlend = new Vector2();
+
+    private final Vector2 rBall = new Vector2();
+    private final Vector2 rPlayerL = new Vector2();
+    private final Vector2 rPlayerR = new Vector2();
+    private final Vector2 rKeeperL = new Vector2();
+    private final Vector2 rKeeperR = new Vector2();
+    private final Vector2 rMateL = new Vector2();
+    private final Vector2 rMateR = new Vector2();
+    private final Vector2 smoothFocusL = new Vector2();
+    private final Vector2 smoothFocusR = new Vector2();
+    private final Vector2 smoothFocusFull = new Vector2();
+    private boolean smoothInitL = false, smoothInitR = false, smoothInitFull = false;
+    private final Vector2 tmpA = new Vector2();
+    private final Vector2 tmpB = new Vector2();
+    private float ballRollDeg = 0f;
+    private float uiScale = 1f;
+    private float unstuckToast = 0f;
+    private float escArmedTime = 0f;
+    private OrthographicCamera overlayCam;
+    private boolean overlaySelfIsLeft = true;
 
     private final ShapeRenderer shapes = new ShapeRenderer();
     private final SpriteBatch batch = new SpriteBatch();
@@ -133,17 +118,17 @@ public class MatchScreen implements Screen {
     private int screenWidth = 1280;
     private int screenHeight = 800;
 
-    // --- Arte generado en runtime en alta resolución y con antialiasing (MK7; sin assets externos) ---
     private Texture texPlayerLeft = PixelArtFactory.buildPersonTexture(MatchSetup.leftTeam.color, MatchSetup.leftTeam.shorts, false);
     private Texture texPlayerRight = PixelArtFactory.buildPersonTexture(MatchSetup.rightTeam.color, MatchSetup.rightTeam.shorts, false);
     private Texture texKeeperLeft = PixelArtFactory.buildPersonTexture(new Color(0.10f, 0.10f, 0.10f, 1f), MatchSetup.leftTeam.color, true);
     private Texture texKeeperRight = PixelArtFactory.buildPersonTexture(new Color(0.10f, 0.10f, 0.10f, 1f), MatchSetup.rightTeam.color, true);
     private final Texture texBall = PixelArtFactory.buildBallTexture();
-    /** MK7: cancha completa (pasto, líneas, arcos con red y carteles) en una sola textura de 32 px/m. */
+
     private final Texture texGround = PixelArtFactory.buildGroundTexture();
     private final Texture texCrowd = PixelArtFactory.buildCrowdTexture();
     private final Texture texShadow = PixelArtFactory.buildShadowTexture();
     private final Texture texRing = PixelArtFactory.buildRingTexture();
+    private final Texture texHalo = PixelArtFactory.buildHaloTexture();
 
     private TextureRegion regionPlayerLeft = new TextureRegion(texPlayerLeft);
     private TextureRegion regionPlayerRight = new TextureRegion(texPlayerRight);
@@ -152,9 +137,8 @@ public class MatchScreen implements Screen {
     private final TextureRegion regionBall = new TextureRegion(texBall);
     private final TextureRegion regionCrowd = new TextureRegion(texCrowd);
 
-    // --- MK4: desenfoque real por shader (con respaldo por capas si no compila) ---
     private final ShaderProgram blurShader = BlurShader.create();
-    /** Región del sprite rival con UVs extendidas (borde transparente) para que el blur no se recorte. */
+
     private TextureRegion blurRegionLeft = paddedRegion(texPlayerLeft);
     private TextureRegion blurRegionRight = paddedRegion(texPlayerRight);
     private static final float BLUR_PAD = 0.25f;
@@ -162,13 +146,10 @@ public class MatchScreen implements Screen {
     private final MotionTrail trailLeft = new MotionTrail(Constants.TRAIL_MAX_POINTS);
     private final MotionTrail trailRight = new MotionTrail(Constants.TRAIL_MAX_POINTS);
 
-    // --- Animación (bobbing simple según velocidad, sin sprites extra) ---
     private float animTime = 0f;
 
-    // --- MK6: identidad del rival online (equipo + nombre) ---
     private String appliedIdentityKey = "";
 
-    /** MK6: aplica el equipo/nombre del rival cuando llegan por red y regenera los sprites con los colores nuevos. */
     private void pollNetIdentity() {
         Protocol.Identity id = null;
         if (mode == GameMode.ONLINE_HOST && netHost != null) id = netHost.getClientIdentity();
@@ -204,7 +185,6 @@ public class MatchScreen implements Screen {
         sim.refreshTeamColors();
     }
 
-    // --- Audio sintetizado en runtime (sin assets externos) ---
     private final Sound sfxKickSoft = AudioFactory.kickTone(0.25f);
     private final Sound sfxKickHard = AudioFactory.kickTone(0.9f);
     private final Sound sfxThud = AudioFactory.thudTone();
@@ -218,7 +198,6 @@ public class MatchScreen implements Screen {
     private boolean keeperRightWasDiving = false;
     private float saveFlashTime = 0f;
 
-    // --- MK4: confeti de gol (coordenadas normalizadas 0..1 dentro de cada panel) ---
     private static final int CONFETTI_MAX = 120;
     private final float[] cfX = new float[CONFETTI_MAX];
     private final float[] cfY = new float[CONFETTI_MAX];
@@ -230,12 +209,10 @@ public class MatchScreen implements Screen {
     private final float[] cfLife = new float[CONFETTI_MAX];
     private final Color[] cfColor = new Color[CONFETTI_MAX];
 
-    // --- MK4: cámara de repetición (ambos paneles siguen la pelota) ---
     private final Vector2 replayFocus = new Vector2();
     private boolean replayFocusInit = false;
     private MatchSimulation.Phase lastPhase = MatchSimulation.Phase.KICKOFF;
 
-    // --- Screen shake (feedback de gol/planchazo fuerte) ---
     private float shakeTime = 0f;
     private float shakeMagnitude = 0f;
 
@@ -251,20 +228,44 @@ public class MatchScreen implements Screen {
 
     @Override
     public void render(float delta) {
+        delta = Math.min(delta, Constants.MAX_FRAME_DELTA);
+        uiScale = MathUtils.clamp(screenHeight / 800f, 0.8f, 2.2f);
+        Fonts.setUiScale(uiScale);
         pollNetIdentity();
         pollInput();
+        updateRightHumans();
         handleGlobalKeys();
         boolean simRuns = updateNetwork(delta);
 
         if (!paused && simRuns) {
             sim.step(delta, inputLeft, inputRight);
-            trailLeft.update(sim.getPlayerLeft().getPosition(), sim.getPlayerLeft().body.getLinearVelocity().len());
-            trailRight.update(sim.getPlayerRight().getPosition(), sim.getPlayerRight().body.getLinearVelocity().len());
+            refreshRenderPositions();
+            trailLeft.update(rPlayerL, sim.getPlayerLeft().body.getLinearVelocity().len());
+            trailRight.update(rPlayerR, sim.getPlayerRight().body.getLinearVelocity().len());
+            Vector2 bv = sim.getBall().body.getLinearVelocity();
+            float bsp = bv.len();
+            ballRollDeg -= (Math.abs(bv.x) >= Math.abs(bv.y) ? Math.signum(bv.x) : Math.signum(bv.y))
+                    * bsp * delta / Constants.BALL_RADIUS * MathUtils.radiansToDegrees;
+            if (unstuckToast > 0f) {
+                unstuckToast -= delta;
+            }
+            if (sim.consumeUnstuckEvent()) {
+                unstuckToast = 2.2f;
+                if (!Settings.muted) {
+                    sfxWhistle.play(0.6f);
+                }
+            }
             animTime += delta;
             updateSfxAndFeedback(delta);
             updateConfetti(delta);
         }
         sendSnapshotIfDue(delta);
+        if (paused || !simRuns) {
+            refreshRenderPositions();
+        }
+        if (escArmedTime > 0f) {
+            escArmedTime -= delta;
+        }
 
         Gdx.gl.glEnable(GL20.GL_BLEND);
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
@@ -273,17 +274,17 @@ public class MatchScreen implements Screen {
         Gdx.gl.glClearColor(0.02f, 0.02f, 0.02f, 1f);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
 
-        int hudHeight = Math.min(Constants.HUD_HEIGHT_PX, screenHeight / 4);
+        int hudHeight = Math.min(Math.round(Constants.HUD_HEIGHT_PX * uiScale), screenHeight / 4);
         int paneAreaHeight = Math.max(1, screenHeight - hudHeight);
 
         int halfWidth = screenWidth / 2;
         int rightWidth = screenWidth - halfWidth;
 
         boolean replaying = sim.getPhase() == MatchSimulation.Phase.REPLAY;
-        Vector2 focusLeft = sim.getPlayerLeft().getPosition();
-        Vector2 focusRight = sim.getPlayerRight().getPosition();
+        Vector2 focusLeft = rPlayerL;
+        Vector2 focusRight = rPlayerR;
         if (replaying) {
-            Vector2 bp = sim.getBall().getPosition();
+            Vector2 bp = rBall;
             if (!replayFocusInit) {
                 replayFocus.set(bp);
                 replayFocusInit = true;
@@ -294,35 +295,55 @@ public class MatchScreen implements Screen {
         } else {
             replayFocusInit = false;
         }
-        if (mode.isOnline() || mode == GameMode.ONE_PLAYER) {
-            // MK5: un solo panel a pantalla completa con la vista propia (online: host = AZUL, cliente = ROJO;
-            // 1 jugador: vos sos el AZUL y la IA es el rival). Solo el 2 jugadores local divide la pantalla.
+        if (mode.isOnline() || mode == GameMode.ONE_PLAYER || mode.isTeamMode()) {
+
             boolean isHost = mode != GameMode.ONLINE_CLIENT;
             OrthographicCamera cam = isHost ? camLeft : camRight;
             Vector2 selfFocus = isHost ? focusLeft : focusRight;
-            if (!replaying) {
-                // La cámara sigue mayormente al jugador pero se inclina hacia la pelota (30 %), así no se pierde la jugada.
-                focusBlend.set(selfFocus).lerp(sim.getBall().getPosition(), Constants.FULL_VIEW_BALL_BIAS);
-                selfFocus = focusBlend;
+            boolean coop = mode.isTeamMode();
+            if (coop && !replaying) {
+
+                selfFocus = tmpA.set(rPlayerL).add(rMateL).scl(0.5f);
+                if (mode == GameMode.FOUR_PLAYERS) {
+
+                    selfFocus = tmpA.set(rPlayerL).add(rMateL).add(rPlayerR).add(rMateR).scl(0.25f);
+                }
             }
-            updateCamera(cam, selfFocus, screenWidth, paneAreaHeight, Constants.FULL_VIEW_HEIGHT);
+            if (!replaying) {
+
+                focusBlend.set(selfFocus).lerp(rBall, coop ? Constants.TEAM_VIEW_BALL_BIAS : Constants.FULL_VIEW_BALL_BIAS);
+                smoothInitFull = smoothTo(smoothFocusFull, focusBlend, smoothInitFull, delta);
+                selfFocus = smoothFocusFull;
+            }
+            updateCamera(cam, selfFocus, screenWidth, paneAreaHeight, coop ? Constants.TEAM_VIEW_HEIGHT : Constants.FULL_VIEW_HEIGHT);
             String fullLabel = mode == GameMode.ONLINE_HOST ? "VOS - EQUIPO " + MatchSetup.leftTeam.name + " (HOST)"
                     : mode == GameMode.ONLINE_CLIENT ? "VOS - EQUIPO " + MatchSetup.rightTeam.name
+                    : mode == GameMode.FOUR_PLAYERS ? "EQUIPO " + MatchSetup.leftTeam.name + "  vs  EQUIPO " + MatchSetup.rightTeam.name
+                    : coop ? "JUGADOR 1 + JUGADOR 2 - EQUIPO " + MatchSetup.leftTeam.name + "  vs  IA"
                     : "VOS - EQUIPO " + MatchSetup.leftTeam.name + "  vs  IA";
-            renderPane(0, 0, screenWidth, paneAreaHeight, cam, isHost, fullLabel, mode == GameMode.ONE_PLAYER);
+            renderPane(0, 0, screenWidth, paneAreaHeight, cam, isHost, fullLabel, mode == GameMode.ONE_PLAYER || coop);
         } else {
+            if (!replaying) {
+
+                tmpA.set(focusLeft).lerp(rBall, Constants.SPLIT_VIEW_BALL_BIAS);
+                tmpB.set(focusRight).lerp(rBall, Constants.SPLIT_VIEW_BALL_BIAS);
+                smoothInitL = smoothTo(smoothFocusL, tmpA, smoothInitL, delta);
+                smoothInitR = smoothTo(smoothFocusR, tmpB, smoothInitR, delta);
+                focusLeft = smoothFocusL;
+                focusRight = smoothFocusR;
+            }
             updateCamera(camLeft, focusLeft, halfWidth, paneAreaHeight);
             updateCamera(camRight, focusRight, rightWidth, paneAreaHeight);
 
-            // Panel izquierdo: vista del Jugador 1. Su rival se dibuja difuminado.
             renderPane(0, 0, halfWidth, paneAreaHeight, camLeft, true, "JUGADOR 1 - EQUIPO " + MatchSetup.leftTeam.name, false);
 
-            // Panel derecho: vista del Jugador 2 (humano o IA de soporte, según el modo elegido en el lobby).
             renderPane(halfWidth, 0, rightWidth, paneAreaHeight, camRight, false, "JUGADOR 2 - EQUIPO " + MatchSetup.rightTeam.name, false);
 
             drawDivider(paneAreaHeight);
         }
         drawSharedHud(paneAreaHeight, hudHeight);
+        drawMiniMap(paneAreaHeight);
+        Fonts.setUiScale(1f);
         if (mode.isOnline()) {
             drawNetStatus();
         }
@@ -336,24 +357,68 @@ public class MatchScreen implements Screen {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Input
-    // ------------------------------------------------------------------
+    private void refreshRenderPositions() {
+        sim.renderBall(rBall);
+        sim.renderPlayerLeft(rPlayerL);
+        sim.renderPlayerRight(rPlayerR);
+        sim.renderKeeperLeft(rKeeperL);
+        sim.renderKeeperRight(rKeeperR);
+        if (sim.hasMates()) {
+            sim.renderMateLeft(rMateL);
+            sim.renderMateRight(rMateR);
+        }
+    }
+
+    private Vector2 rpos(Object e) {
+        if (e == sim.getBall()) return rBall;
+        if (e == sim.getPlayerLeft()) return rPlayerL;
+        if (e == sim.getPlayerRight()) return rPlayerR;
+        if (e == sim.getKeeperLeft()) return rKeeperL;
+        if (sim.hasMates() && e == sim.getMateLeft()) return rMateL;
+        if (sim.hasMates() && e == sim.getMateRight()) return rMateR;
+        return rKeeperR;
+    }
+
+    private boolean smoothTo(Vector2 state, Vector2 target, boolean init, float delta) {
+        if (!init || state.dst2(target) > 100f) {
+            state.set(target);
+        } else {
+            state.lerp(target, 1f - (float) Math.exp(-Constants.CAM_FOLLOW_RATE * delta));
+        }
+        return true;
+    }
 
     private void handleGlobalKeys() {
         if (Gdx.input.isKeyJustPressed(Input.Keys.F1)) {
             showDebug = !showDebug;
         }
-        // Online no hay pausa ni reinicio: pausar al host congelaría al rival.
-        if (Gdx.input.isKeyJustPressed(Input.Keys.P) && !mode.isOnline()) {
+
+        boolean padStart = Gamepads.anyStartJust();
+        if (padStart && sim.getPhase() == MatchSimulation.Phase.FULL_TIME && !mode.isOnline()) {
+
+            closeNetwork();
+            game.setScreen(new LobbyScreen(game));
+            return;
+        }
+        if ((Gdx.input.isKeyJustPressed(Input.Keys.P) || padStart) && !mode.isOnline()) {
             paused = !paused;
+            if (!paused) {
+
+                inputLeft.clearTransient();
+                inputRight.clearTransient();
+                inputP3.clearTransient();
+                inputP4.clearTransient();
+            }
         }
         if (Gdx.input.isKeyJustPressed(Input.Keys.R)) {
             if (!mode.isOnline()) {
-                restartMatch();
+
+                if (paused || sim.getPhase() == MatchSimulation.Phase.FULL_TIME) {
+                    restartMatch();
+                }
             } else if (mode == GameMode.ONLINE_HOST && netHost.hasClient()
                     && sim.getPhase() == MatchSimulation.Phase.FULL_TIME) {
-                restartMatch(); // MK5: revancha online; el cliente recibe el partido nuevo por snapshots
+                restartMatch();
             }
         }
         if (Gdx.input.isKeyJustPressed(Input.Keys.TAB) && !paused) {
@@ -364,19 +429,16 @@ public class MatchScreen implements Screen {
             Settings.save();
         }
         if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
-            closeNetwork();
-            game.setScreen(new LobbyScreen(game));
+
+            if (escArmedTime > 0f || paused || sim.getPhase() == MatchSimulation.Phase.FULL_TIME) {
+                closeNetwork();
+                game.setScreen(new LobbyScreen(game));
+            } else {
+                escArmedTime = 2.5f;
+            }
         }
     }
 
-    // ------------------------------------------------------------------
-    // Online 1v1
-    // ------------------------------------------------------------------
-
-    /**
-     * Atiende la red una vez por frame. Devuelve false si la simulación NO debe avanzar
-     * (host esperando rival). El cliente nunca simula: MatchSimulation.step() lo ignora y solo aplica snapshots.
-     */
     private boolean updateNetwork(float delta) {
         if (mode == GameMode.ONLINE_HOST) {
             netHost.poll();
@@ -386,7 +448,7 @@ public class MatchScreen implements Screen {
                 inputRight.sprint = false;
                 inputRight.kickHeld = false;
                 inputRight.clearTransient();
-                return false; // sin rival la pelota no se mueve
+                return false;
             }
             hostHadClient = true;
             netHost.drainInto(inputRight);
@@ -397,18 +459,17 @@ public class MatchScreen implements Screen {
             if (netClient.takeSnapshot(netSnap)) {
                 netInterp.push(netSnap, System.nanoTime());
             }
-            // MK5: se dibuja el estado de hace ~70 ms mezclando los dos snapshots que lo rodean (60 fps parejos).
+
             if (netInterp.sample(System.nanoTime(), netSnap)) {
                 sim.applySnapshot(netSnap);
             }
             netClient.sendInput(inputRight);
-            inputRight.clearTransient(); // los eventos se mandaron una vez; no se repiten
-            return true; // sim.step() no hace nada en el cliente, pero rastros, sonido y confeti sí deben correr
+            inputRight.clearTransient();
+            return true;
         }
         return true;
     }
 
-    /** HOST: manda el estado ~30 veces por segundo (por tiempo, no por tick: en la repetición el tick no avanza). */
     private void sendSnapshotIfDue(float delta) {
         if (mode != GameMode.ONLINE_HOST || !netHost.hasClient()) {
             return;
@@ -419,7 +480,7 @@ public class MatchScreen implements Screen {
         }
         netSendAccum = Math.min(netSendAccum - Constants.SIM_STEP, Constants.SIM_STEP);
         sim.fillSnapshot(netSnap);
-        netSnap.tick = netSeq++; // el cliente descarta paquetes con número menor o igual al último
+        netSnap.tick = netSeq++;
         netHost.sendSnapshot(netSnap);
     }
 
@@ -428,7 +489,6 @@ public class MatchScreen implements Screen {
         if (netClient != null) netClient.close();
     }
 
-    /** Cartel de estado de la conexión (esperando rival, conectando, conexión perdida). */
     private void drawNetStatus() {
         String title = null;
         String line = null;
@@ -477,7 +537,6 @@ public class MatchScreen implements Screen {
         batch.end();
     }
 
-    /** MK5: ping en la esquina inferior izquierda (verde < 60 ms, amarillo < 120, rojo más). */
     private void drawPingBadge() {
         int ping = mode == GameMode.ONLINE_CLIENT ? netClient.getPingMs() : netHost.getClientPingMs();
         if (ping < 0) {
@@ -508,6 +567,7 @@ public class MatchScreen implements Screen {
     private void restartMatch() {
         sim.dispose();
         sim = new MatchSimulation(mode);
+        configureSim();
         paused = false;
         goalLog.clear();
         saveFlashTime = 0f;
@@ -518,26 +578,49 @@ public class MatchScreen implements Screen {
         trailRight.clear();
     }
 
+    private int padOfSlot(int slot) {
+        if (mode == GameMode.FOUR_PLAYERS) {
+            return slot == 0 ? 2 : slot == 1 ? 3 : slot == 2 ? 0 : 1;
+        }
+        return slot < 2 ? slot : -1;
+    }
+
+    private void applyDevices(PlayerInput in, int slot, float kx, float ky, boolean kSprint, boolean kSlideJust, boolean kKick) {
+        Gamepads.State g = Gamepads.state(padOfSlot(slot));
+        float x = kx;
+        float y = ky;
+        if (g.present) {
+            if (Math.abs(g.moveX) > Math.abs(x)) x = g.moveX;
+            if (Math.abs(g.moveY) > Math.abs(y)) y = g.moveY;
+        }
+        in.moveX = x;
+        in.moveY = y;
+        in.normalizeMove();
+        in.sprint = kSprint || (g.present && g.sprint);
+
+        if (kSlideJust || (g.present && g.slideJust)) in.slidePressed = true;
+        boolean kick = kKick || (g.present && g.kick);
+        if (kickPrev[slot] && !kick) in.kickReleased = true;
+        in.kickHeld = kick;
+        kickPrev[slot] = kick;
+    }
+
     private void pollInput() {
-        inputLeft.moveX = 0;
-        inputLeft.moveY = 0;
-        if (Gdx.input.isKeyPressed(Input.Keys.A)) inputLeft.moveX -= 1;
-        if (Gdx.input.isKeyPressed(Input.Keys.D)) inputLeft.moveX += 1;
-        if (Gdx.input.isKeyPressed(Input.Keys.W)) inputLeft.moveY += 1;
-        if (Gdx.input.isKeyPressed(Input.Keys.S)) inputLeft.moveY -= 1;
-        inputLeft.normalizeMove();
-        inputLeft.sprint = Gdx.input.isKeyPressed(Input.Keys.SHIFT_LEFT);
-        // MK4 (fix): los eventos de un solo disparo son "pegajosos" (OR): el juego renderiza a 60 fps pero
-        // simula a 30 Hz, así que en la mitad de los frames no corre ningún tick. Si el evento se pisaba
-        // en cada frame, la mitad de los planchazos/pateos se perdía. MatchSimulation los limpia al usarlos.
-        if (Gdx.input.isKeyJustPressed(Input.Keys.CONTROL_LEFT)) inputLeft.slidePressed = true;
-        boolean spacePressed = Gdx.input.isKeyPressed(Input.Keys.SPACE);
-        if (kickHeldPrevLeft && !spacePressed) inputLeft.kickReleased = true;
-        inputLeft.kickHeld = spacePressed;
-        kickHeldPrevLeft = spacePressed;
+        Gamepads.poll();
+
+        float k1x = 0f;
+        float k1y = 0f;
+        if (Gdx.input.isKeyPressed(Input.Keys.A)) k1x -= 1;
+        if (Gdx.input.isKeyPressed(Input.Keys.D)) k1x += 1;
+        if (Gdx.input.isKeyPressed(Input.Keys.W)) k1y += 1;
+        if (Gdx.input.isKeyPressed(Input.Keys.S)) k1y -= 1;
+        applyDevices(inputLeft, 0, k1x, k1y,
+                Gdx.input.isKeyPressed(Input.Keys.SHIFT_LEFT),
+                Gdx.input.isKeyJustPressed(Input.Keys.CONTROL_LEFT),
+                Gdx.input.isKeyPressed(Input.Keys.SPACE));
 
         if (mode == GameMode.ONLINE_CLIENT) {
-            // El cliente controla al equipo ROJO con el mismo esquema (WASD / Shift / Ctrl / Espacio).
+
             inputRight.moveX = inputLeft.moveX;
             inputRight.moveY = inputLeft.moveY;
             inputRight.sprint = inputLeft.sprint;
@@ -547,29 +630,75 @@ public class MatchScreen implements Screen {
             inputLeft.clearTransient();
         }
 
-        if (mode == GameMode.TWO_PLAYERS) {
-            inputRight.moveX = 0;
-            inputRight.moveY = 0;
-            if (Gdx.input.isKeyPressed(Input.Keys.LEFT)) inputRight.moveX -= 1;
-            if (Gdx.input.isKeyPressed(Input.Keys.RIGHT)) inputRight.moveX += 1;
-            if (Gdx.input.isKeyPressed(Input.Keys.UP)) inputRight.moveY += 1;
-            if (Gdx.input.isKeyPressed(Input.Keys.DOWN)) inputRight.moveY -= 1;
-            inputRight.normalizeMove();
-            inputRight.sprint = Gdx.input.isKeyPressed(Input.Keys.CONTROL_RIGHT);
-            if (Gdx.input.isKeyJustPressed(Input.Keys.SHIFT_RIGHT)) inputRight.slidePressed = true;
-            boolean enterPressed = Gdx.input.isKeyPressed(Input.Keys.ENTER);
-            if (kickHeldPrevRight && !enterPressed) inputRight.kickReleased = true;
-            inputRight.kickHeld = enterPressed;
-            kickHeldPrevRight = enterPressed;
+        if (mode == GameMode.TWO_PLAYERS || mode.isTeamMode()) {
+
+            float k2x = 0f;
+            float k2y = 0f;
+            if (Gdx.input.isKeyPressed(Input.Keys.LEFT) || Gdx.input.isKeyPressed(Input.Keys.J)) k2x -= 1;
+            if (Gdx.input.isKeyPressed(Input.Keys.RIGHT) || Gdx.input.isKeyPressed(Input.Keys.L)) k2x += 1;
+            if (Gdx.input.isKeyPressed(Input.Keys.UP) || Gdx.input.isKeyPressed(Input.Keys.I)) k2y += 1;
+            if (Gdx.input.isKeyPressed(Input.Keys.DOWN) || Gdx.input.isKeyPressed(Input.Keys.K)) k2y -= 1;
+            applyDevices(inputRight, 1, k2x, k2y,
+                    Gdx.input.isKeyPressed(Input.Keys.CONTROL_RIGHT) || Gdx.input.isKeyPressed(Input.Keys.N),
+                    Gdx.input.isKeyJustPressed(Input.Keys.SHIFT_RIGHT) || Gdx.input.isKeyJustPressed(Input.Keys.PERIOD),
+                    Gdx.input.isKeyPressed(Input.Keys.ENTER) || Gdx.input.isKeyPressed(Input.Keys.COMMA));
         }
-        // En modo 1 jugador, inputRight ni se lee: MatchSimulation ignora este
-        // parámetro y usa su IA de soporte interna para el Jugador 2.
+        if (mode == GameMode.FOUR_PLAYERS) {
+
+            applyDevices(inputP3, 2, 0f, 0f, false, false, false);
+            applyDevices(inputP4, 3, 0f, 0f, false, false, false);
+        }
+
     }
 
-    // ------------------------------------------------------------------
-    // Sonido y feedback (screen shake) — reacciona a eventos "de un solo
-    // disparo" que expone MatchSimulation, sin acoplar la física al audio.
-    // ------------------------------------------------------------------
+    private void configureSim() {
+        if (mode == GameMode.FOUR_PLAYERS) {
+            Gamepads.poll();
+            lastRedHumanKey = -1;
+            updateRightHumans();
+        }
+    }
+
+    private int lastRedHumanKey = -1;
+
+    private void updateRightHumans() {
+        if (mode != GameMode.FOUR_PLAYERS) {
+            return;
+        }
+        boolean h3 = Gamepads.has(padOfSlot(2));
+        boolean h4 = Gamepads.has(padOfSlot(3));
+        int key = (h3 ? 1 : 0) | (h4 ? 2 : 0);
+        sim.setRightHumans(h3, inputP3, h4, inputP4);
+        if (key != lastRedHumanKey) {
+            lastRedHumanKey = key;
+            MatchSetup.rightName = h3 ? "JUGADOR 3" : "CPU 3";
+            MatchSetup.rightMateName = h4 ? "JUGADOR 4" : "CPU 4";
+        }
+    }
+
+    private PlayerInput inputOf(PlayerEntity p) {
+        if (p == sim.getPlayerLeft()) return inputLeft;
+        if (sim.hasMates()) {
+            if (p == sim.getMateLeft()) return inputRight;
+            if (p == sim.getPlayerRight() && mode == GameMode.FOUR_PLAYERS) return inputP3;
+            if (p == sim.getMateRight() && mode == GameMode.FOUR_PLAYERS) return inputP4;
+        }
+        return inputRight;
+    }
+
+    private Color humanTint(PlayerEntity p) {
+        if (!sim.hasMates()) return null;
+        if (p == sim.getMateLeft()) return TINT_J2;
+        if (mode == GameMode.FOUR_PLAYERS) {
+            if (p == sim.getPlayerRight()) return TINT_J3;
+            if (p == sim.getMateRight()) return TINT_J4;
+        }
+        return null;
+    }
+
+    private static final Color TINT_J2 = new Color(0.45f, 0.92f, 1f, 1f);
+    private static final Color TINT_J3 = new Color(1f, 0.62f, 0.2f, 1f);
+    private static final Color TINT_J4 = new Color(0.82f, 0.55f, 1f, 1f);
 
     private void updateSfxAndFeedback(float delta) {
         Float kickPower = sim.consumeKickSfxEvent();
@@ -627,10 +756,6 @@ public class MatchScreen implements Screen {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Confeti (MK4): partículas 2D dibujadas sobre cada panel al hacer un gol
-    // ------------------------------------------------------------------
-
     private void spawnConfetti(Color teamColor) {
         Color[] palette = {teamColor, new Color(1f, 0.85f, 0.2f, 1f), Color.WHITE, new Color(teamColor).lerp(Color.WHITE, 0.5f)};
         for (int i = 0; i < CONFETTI_MAX; i++) {
@@ -685,10 +810,6 @@ public class MatchScreen implements Screen {
         shakeMagnitude = Math.max(shakeMagnitude, magnitude);
     }
 
-    // ------------------------------------------------------------------
-    // Cámaras (una por jugador humano, sigue su propia posición)
-    // ------------------------------------------------------------------
-
     private void updateCamera(OrthographicCamera cam, Vector2 focus, int paneWidthPx, int paneHeightPx) {
         updateCamera(cam, focus, paneWidthPx, paneHeightPx, Constants.SPLIT_VIEW_HEIGHT);
     }
@@ -708,8 +829,6 @@ public class MatchScreen implements Screen {
                 ? 0f
                 : MathUtils.clamp(focus.y, -halfFieldH + cam.viewportHeight / 2f, halfFieldH - cam.viewportHeight / 2f);
 
-        // Screen shake: sacude ambos paneles brevemente en golpes fuertes/goles,
-        // con la intensidad decayendo a lo largo de shakeTime.
         if (shakeTime > 0f) {
             float falloff = shakeTime / 0.35f;
             camX += MathUtils.random(-1f, 1f) * shakeMagnitude * falloff;
@@ -719,10 +838,6 @@ public class MatchScreen implements Screen {
         cam.position.set(camX, camY, 0);
         cam.update();
     }
-
-    // ------------------------------------------------------------------
-    // Render de cada mitad de pantalla
-    // ------------------------------------------------------------------
 
     private void renderPane(int x, int y, int w, int h, OrthographicCamera cam, boolean leftIsSelf, String cornerLabel,
                             boolean sharpRival) {
@@ -737,25 +852,41 @@ public class MatchScreen implements Screen {
         String selfName = leftIsSelf ? MatchSetup.leftName : MatchSetup.rightName;
         String rivalName = leftIsSelf ? MatchSetup.rightName : MatchSetup.leftName;
 
+        overlayCam = cam;
+        overlaySelfIsLeft = leftIsSelf;
         drawField(cam);
-        drawGroundShadow(cam, sim.getKeeperLeft().getPosition());
-        drawGroundShadow(cam, sim.getKeeperRight().getPosition());
-        drawGroundShadow(cam, self.getPosition());
-        drawGroundShadow(cam, rival.getPosition());
+        drawGroundShadow(cam, rKeeperL);
+        drawGroundShadow(cam, rKeeperR);
+        drawGroundShadow(cam, rpos(self));
+        drawGroundShadow(cam, rpos(rival));
+        if (sim.hasMates()) {
+            drawGroundShadow(cam, rMateL);
+            drawGroundShadow(cam, rMateR);
+        }
 
         drawGoalkeeper(cam, sim.getKeeperLeft(), regionKeeperLeft, Constants.KEEPER_LEFT_NAME);
         drawGoalkeeper(cam, sim.getKeeperRight(), regionKeeperRight, Constants.KEEPER_RIGHT_NAME);
 
         drawBall(cam);
 
-        // El rival humano se dibuja primero (con su rastro) para quedar "detrás" visualmente.
         rivalTrail.render(shapes(cam), rival.teamColor, Constants.PLAYER_RADIUS * 0.9f);
-        if (sharpRival) {
-            drawSharpRival(cam, rival, rivalRegion, rivalName); // MK5: contra la IA no hace falta difuminarla
+        if (sharpRival && mode == GameMode.FOUR_PLAYERS && sim.isRightHuman(0)) {
+            drawSelfPlayer(cam, rival, rivalRegion, rivalName);
+        } else if (sharpRival) {
+            drawSharpRival(cam, rival, rivalRegion, rivalName);
         } else {
             drawBlurredRival(cam, rival, rivalRegion, rivalName);
         }
 
+        if (sim.hasMates()) {
+
+            if (mode == GameMode.FOUR_PLAYERS && sim.isRightHuman(1)) {
+                drawSelfPlayer(cam, sim.getMateRight(), regionPlayerRight, MatchSetup.rightMateName);
+            } else {
+                drawSharpRival(cam, sim.getMateRight(), regionPlayerRight, MatchSetup.rightMateName);
+            }
+            drawSelfPlayer(cam, sim.getMateLeft(), regionPlayerLeft, MatchSetup.leftMateName);
+        }
         selfTrail.render(shapes(cam), self.teamColor, Constants.PLAYER_RADIUS * 0.9f);
         drawSelfPlayer(cam, self, selfRegion, selfName);
 
@@ -771,10 +902,6 @@ public class MatchScreen implements Screen {
         return shapes;
     }
 
-    // ------------------------------------------------------------------
-    // Cancha: pasto a rayas, líneas, áreas, arcos con red y tribuna
-    // ------------------------------------------------------------------
-
     private void drawField(OrthographicCamera cam) {
         Field field = sim.getField();
         float halfW = field.width / 2f;
@@ -782,14 +909,12 @@ public class MatchScreen implements Screen {
         float gx = halfW + Constants.FIELD_MARGIN;
         float gy = halfH + Constants.FIELD_MARGIN;
 
-        // MK7: una sola textura con pasto, líneas (antialiasadas), arcos con red y carteles.
         batch.setProjectionMatrix(cam.combined);
         batch.begin();
         batch.setColor(Color.WHITE);
         batch.draw(texGround, -gx, -gy, gx * 2f, gy * 2f);
         batch.end();
 
-        // Tribunas detrás de los carteles (la de abajo va espejada: el fondo siempre queda lejos de la cancha).
         float bandH = PixelArtFactory.CROWD_BAND_HEIGHT;
         drawCrowdBand(cam, -gx, halfH + 0.60f, gx * 2f, bandH, false);
         drawCrowdBand(cam, -gx, -halfH - 0.60f - bandH, gx * 2f, bandH, true);
@@ -811,7 +936,7 @@ public class MatchScreen implements Screen {
     }
 
     private void drawGroundShadow(OrthographicCamera cam, Vector2 pos) {
-        // MK7: sombra suave (textura con degradé) en vez de una elipse plana. Se centra en los pies del sprite.
+
         float w = Constants.PLAYER_RADIUS * 3.0f;
         float h = w * 0.42f;
         float feetY = pos.y - Constants.SPRITE_HEIGHT_METERS * 0.18f - 0.02f;
@@ -824,43 +949,52 @@ public class MatchScreen implements Screen {
 
     private void drawBall(OrthographicCamera cam) {
         Ball ball = sim.getBall();
-        Vector2 pos = ball.getPosition();
-        float size = Constants.BALL_RADIUS * 2.1f;
-        float angleDeg = ball.body.getAngle() * MathUtils.radiansToDegrees;
+        Vector2 pos = rBall;
+        float size = Constants.BALL_VISUAL_DIAMETER;
+        float angleDeg = ballRollDeg + ball.body.getAngle() * MathUtils.radiansToDegrees;
+        Vector2 vel = ball.body.getLinearVelocity();
+        float speed = vel.len();
 
         batch.setProjectionMatrix(cam.combined);
         batch.begin();
-        // MK7: sombra suave corrida hacia abajo-derecha
+
+        float haloS = size * 2.1f;
+        batch.setColor(1f, 1f, 1f, 0.55f);
+        batch.draw(texHalo, pos.x - haloS / 2f, pos.y - haloS / 2f, haloS, haloS);
+
         float sw = size * 1.5f;
         batch.setColor(1f, 1f, 1f, 0.8f);
         batch.draw(texShadow, pos.x - sw / 2f + size * 0.12f, pos.y - sw * 0.42f / 2f - size * 0.22f, sw, sw * 0.62f);
+
+        if (speed > 9f) {
+            for (int k = 4; k >= 1; k--) {
+                float a = 0.30f * (1f - k / 5f);
+                float sz = size * (1f - 0.08f * k);
+                float ox = pos.x - vel.x * 0.014f * k;
+                float oy = pos.y - vel.y * 0.014f * k;
+                batch.setColor(1f, 1f, 1f, a);
+                batch.draw(regionBall, ox - sz / 2f, oy - sz / 2f, sz / 2f, sz / 2f, sz, sz, 1f, 1f, angleDeg);
+            }
+        }
         batch.setColor(Color.WHITE);
         batch.draw(regionBall, pos.x - size / 2f, pos.y - size / 2f, size / 2f, size / 2f, size, size, 1f, 1f, angleDeg);
         batch.end();
     }
 
-    /** Arquero 100% IA: siempre nítido (no es "el rival humano", es parte fija del campo). Nunca se tira al piso. */
     private void drawGoalkeeper(OrthographicCamera cam, GoalkeeperEntity keeper, TextureRegion region, String name) {
         float dive = Math.abs(keeper.getVisualDive());
         batch.setProjectionMatrix(cam.combined);
         batch.begin();
         batch.setColor(Color.WHITE);
-        // Estirada (MK4): el arquero "salta" y se estira en la dirección del movimiento.
-        drawSpriteInBatch(region, keeper.getPosition(), 0f, 1f, false,
+
+        drawSpriteInBatch(region, rpos(keeper), 0f, 1f, false,
                 Math.abs(keeper.body.getLinearVelocity().y), dive * 0.35f, 1f + dive * 0.32f);
         batch.end();
-        drawNameTag(cam, keeper.getPosition(), name, keeper.color);
+        drawNameTag(cam, rpos(keeper), name, keeper.color);
     }
 
-    /**
-     * Dibuja al jugador rival "difuminado": varias copias translúcidas de tamaño
-     * creciente, simulando un desenfoque barato sin necesidad de un pipeline de
-     * shaders/FrameBuffer (fuera del alcance actual), ahora aplicado sobre el
-     * sprite pixel-art en vez de un círculo liso.
-     */
-    /** MK5: rival nítido (sin difuminado ni anillo), para el modo 1 jugador a pantalla completa. */
     private void drawSharpRival(OrthographicCamera cam, PlayerEntity rival, TextureRegion region, String name) {
-        Vector2 pos = rival.getPosition();
+        Vector2 pos = rpos(rival);
         if (rival.isSliding()) {
             drawSlideDust(cam, pos);
         }
@@ -870,7 +1004,7 @@ public class MatchScreen implements Screen {
     }
 
     private void drawBlurredRival(OrthographicCamera cam, PlayerEntity rival, TextureRegion region, String name) {
-        Vector2 pos = rival.getPosition();
+        Vector2 pos = rpos(rival);
         float vx = rival.body.getLinearVelocity().x;
         boolean sliding = rival.isSliding();
         int layers = 5;
@@ -902,13 +1036,8 @@ public class MatchScreen implements Screen {
         drawNameTag(cam, pos, name, new Color(rival.teamColor.r, rival.teamColor.g, rival.teamColor.b, 0.65f));
     }
 
-    /**
-     * MK4: desenfoque REAL por shader (gaussiano 5x5) sobre el sprite del rival. Se dibuja el sprite
-     * con UVs extendidas (un margen transparente alrededor) para que el difuminado no se corte
-     * en el borde del sprite. El radio crece un poco con la velocidad (efecto de movimiento).
-     */
     private void drawShaderBlurredRival(OrthographicCamera cam, PlayerEntity rival, TextureRegion padded) {
-        Vector2 pos = rival.getPosition();
+        Vector2 pos = rpos(rival);
         Vector2 vel = rival.body.getLinearVelocity();
         boolean sliding = rival.isSliding();
         float speed = vel.len();
@@ -946,7 +1075,7 @@ public class MatchScreen implements Screen {
     }
 
     private void drawSelfPlayer(OrthographicCamera cam, PlayerEntity self, TextureRegion region, String name) {
-        Vector2 pos = self.getPosition();
+        Vector2 pos = rpos(self);
         float vx = self.body.getLinearVelocity().x;
         boolean sliding = self.isSliding();
 
@@ -954,14 +1083,20 @@ public class MatchScreen implements Screen {
             drawSlideDust(cam, pos);
         }
 
-        // Anillo blanco bajo los pies: remarca cuál es el personaje propio.
-        // MK7: anillo suave (textura) en lugar de un círculo de 1 px.
         float ringW = Constants.PLAYER_RADIUS * 3.2f;
         float ringH = ringW * 0.5f;
         float feetY = pos.y - Constants.SPRITE_HEIGHT_METERS * 0.18f - 0.02f;
         batch.setProjectionMatrix(cam.combined);
         batch.begin();
-        batch.setColor(1f, 1f, 1f, 0.95f);
+
+        Color tint = humanTint(self);
+        if (self.isNear(sim.getBall()) && sim.getPhase() == MatchSimulation.Phase.PLAYING) {
+            batch.setColor(1f, 0.88f, 0.25f, 1f);
+        } else if (tint != null) {
+            batch.setColor(tint.r, tint.g, tint.b, 0.95f);
+        } else {
+            batch.setColor(1f, 1f, 1f, 0.95f);
+        }
         batch.draw(texRing, pos.x - ringW / 2f, feetY - ringH / 2f, ringW, ringH);
         batch.setColor(Color.WHITE);
         batch.end();
@@ -969,7 +1104,22 @@ public class MatchScreen implements Screen {
         drawCharacterSprite(cam, region, pos, vx, 1f, sliding, self.body.getLinearVelocity().len());
         drawNameTag(cam, pos, name, self.teamColor);
 
-        // MK6: barrita fina de recarga del planchazo (en el cliente online no se sincroniza, así que ahí no se muestra).
+        if (sim.getPhase() == MatchSimulation.Phase.KICKOFF) {
+            float bob = 0.18f * (float) Math.sin(animTime * 7f);
+            float ay = pos.y + Constants.SPRITE_HEIGHT_METERS * 0.85f + 0.95f + bob;
+            shapes(cam);
+            shapes.begin(ShapeRenderer.ShapeType.Filled);
+            shapes.setColor(0f, 0f, 0f, 0.6f);
+            shapes.triangle(pos.x - 0.46f, ay + 0.04f, pos.x + 0.46f, ay + 0.04f, pos.x, ay - 0.56f);
+            if (tint != null) {
+                shapes.setColor(tint);
+            } else {
+                shapes.setColor(1f, 0.88f, 0.25f, 1f);
+            }
+            shapes.triangle(pos.x - 0.38f, ay + 0.1f, pos.x + 0.38f, ay + 0.1f, pos.x, ay - 0.46f);
+            shapes.end();
+        }
+
         float cd = self.getSlideCooldownFraction();
         if (cd > 0f && mode != GameMode.ONLINE_CLIENT) {
             shapes.begin(ShapeRenderer.ShapeType.Filled);
@@ -982,16 +1132,33 @@ public class MatchScreen implements Screen {
 
         float power = self.getKickPower();
         if (power > 0f) {
+            shapes(cam);
+
+            float bw = 1.7f;
             shapes.begin(ShapeRenderer.ShapeType.Filled);
-            shapes.setColor(0.1f, 0.1f, 0.1f, 0.6f);
-            shapes.rect(pos.x - 0.62f, pos.y + 1.05f, 1.24f, 0.20f);
-            shapes.setColor(1f, 0.82f, 0.15f, 1f);
-            shapes.rect(pos.x - 0.6f, pos.y + 1.07f, 1.2f * power, 0.16f);
+            shapes.setColor(0.05f, 0.05f, 0.05f, 0.75f);
+            shapes.rect(pos.x - bw / 2f - 0.04f, pos.y + 1.03f, bw + 0.08f, 0.30f);
+            shapes.setColor(1f, 0.85f - 0.55f * power, 0.1f, 1f);
+            shapes.rect(pos.x - bw / 2f, pos.y + 1.07f, bw * power, 0.22f);
             shapes.end();
+
+            if (!sliding && self.isNear(sim.getBall())) {
+                boolean isLeft = self == sim.getPlayerLeft() || (sim.hasMates() && self == sim.getMateLeft());
+                PlayerInput in = inputOf(self);
+                Vector2 dir = MatchSimulation.kickDirection(pos, rBall, in, isLeft ? 0 : 1, new Vector2());
+                float len = 2.5f + 9f * power;
+                Gdx.gl.glEnable(GL20.GL_BLEND);
+                shapes.begin(ShapeRenderer.ShapeType.Filled);
+                for (float d = 0.6f; d < len; d += 0.55f) {
+                    float fade = 1f - d / (len + 0.5f);
+                    shapes.setColor(1f, 0.95f - 0.6f * power, 0.2f, 0.25f + 0.7f * fade);
+                    shapes.circle(rBall.x + dir.x * d, rBall.y + dir.y * d, 0.10f + 0.06f * fade, 8);
+                }
+                shapes.end();
+            }
         }
     }
 
-    /** Nube de polvo simple detrás de un jugador en pleno planchazo. */
     private void drawSlideDust(OrthographicCamera cam, Vector2 pos) {
         shapes(cam);
         shapes.begin(ShapeRenderer.ShapeType.Filled);
@@ -1012,22 +1179,14 @@ public class MatchScreen implements Screen {
         batch.end();
     }
 
-    /** Debe llamarse entre {@code batch.begin()}/{@code batch.end()} ya abiertos por quien invoque. */
     private void drawSpriteInBatch(TextureRegion region, Vector2 pos, float vx, float scale, boolean sliding) {
         drawSpriteInBatch(region, pos, vx, scale, sliding, 0f);
     }
 
-    /**
-     * @param moveSpeed magnitud de la velocidad actual (m/s), usada para animar un
-     *                  "bobbing" de carrera (sube y baja + ligero squash) proporcional
-     *                  al ritmo de zancada. Reemplaza el sprite estático de la Etapa 1
-     *                  mejorada sin necesitar frames de animación adicionales.
-     */
     private void drawSpriteInBatch(TextureRegion region, Vector2 pos, float vx, float scale, boolean sliding, float moveSpeed) {
         drawSpriteInBatch(region, pos, vx, scale, sliding, moveSpeed, 0f, 1f);
     }
 
-    /** @param lift elevación extra (m) y @param stretchY estiramiento vertical, usados por la estirada del arquero. */
     private void drawSpriteInBatch(TextureRegion region, Vector2 pos, float vx, float scale, boolean sliding,
                                    float moveSpeed, float lift, float stretchY) {
         float spriteHeight = Constants.SPRITE_HEIGHT_METERS * scale;
@@ -1037,14 +1196,12 @@ public class MatchScreen implements Screen {
         float originY = spriteHeight * 0.18f;
         float facing = vx < -0.05f ? -1f : 1f;
 
-        // Mientras se desliza, se rota el sprite para simular al jugador tirado
-        // "planchando" en el piso, en vez de mostrarlo corriendo de pie.
         float rotation = sliding ? -62f * facing : 0f;
 
         float bobY = 0f;
         float squash = 1f;
         if (!sliding && moveSpeed > 0.3f) {
-            float strideHz = 2.2f + moveSpeed * 0.35f; // cadencia de zancada según velocidad
+            float strideHz = 2.2f + moveSpeed * 0.35f;
             float phase = animTime * strideHz * MathUtils.PI2;
             bobY = Math.abs(MathUtils.sin(phase)) * 0.06f;
             squash = 1f - Math.abs(MathUtils.sin(phase)) * 0.04f;
@@ -1061,7 +1218,7 @@ public class MatchScreen implements Screen {
     private void drawNameTag(OrthographicCamera cam, Vector2 pos, String name, Color color) {
         batch.setProjectionMatrix(cam.combined);
         batch.begin();
-        font.getData().setScale((0.024f) * Fonts.K);
+        font.getData().setScale((0.024f) * Fonts.baseK);
         GlyphLayout layout = new GlyphLayout(font, name);
         float textY = pos.y + Constants.SPRITE_HEIGHT_METERS * 0.85f + layout.height;
 
@@ -1073,10 +1230,6 @@ public class MatchScreen implements Screen {
         batch.end();
     }
 
-    // ------------------------------------------------------------------
-    // Overlays por panel (cuenta regresiva, gol, entretiempo, final)
-    // ------------------------------------------------------------------
-
     private void drawPaneOverlay(int paneWidthPx, int paneHeightPx, String cornerLabel) {
         hudCam.setToOrtho(false, paneWidthPx, paneHeightPx);
         hudCam.update();
@@ -1087,6 +1240,7 @@ public class MatchScreen implements Screen {
             drawReplayBars(paneWidthPx, paneHeightPx);
         }
         drawConfetti(paneWidthPx, paneHeightPx);
+        drawBallPointer(paneWidthPx, paneHeightPx);
 
         batch.begin();
         font.getData().setScale((0.9f) * Fonts.K);
@@ -1109,15 +1263,20 @@ public class MatchScreen implements Screen {
         if (phase == MatchSimulation.Phase.KICKOFF) {
             drawBigCenteredText(paneWidthPx, paneHeightPx, kickoffCountdownText(), Color.WHITE, 2.6f);
             if (sim.getHalf() == 3) {
-                // MK6: tiempo extra, el primero que convierte gana.
+
                 drawCentered("TIEMPO EXTRA - GOL DE ORO", paneWidthPx / 2f, paneHeightPx / 2f - 10f, 1.2f,
                         new Color(1f, 0.85f, 0.2f, 1f));
                 font.getData().setScale((1f) * Fonts.K);
             }
-            // Recordatorio de controles solo en el saque inicial del primer tiempo (sim.getHalf()==1),
-            // para no repetirlo en cada reinicio de jugada y no tapar la acción una vez arrancado el partido.
+
             if (sim.getHalf() == 1 && sim.getScoreLeft() == 0 && sim.getScoreRight() == 0) {
-                drawControlsHint(paneWidthPx, paneHeightPx, !cornerLabel.startsWith("JUGADOR 2"));
+                if (mode.isTeamMode()) {
+                    drawHintLine(paneWidthPx, teamHintLine(0), 0f);
+                    drawHintLine(paneWidthPx, teamHintLine(1), 22f * uiScale);
+                    drawHintLine(paneWidthPx, teamHintLine(2), 44f * uiScale);
+                } else {
+                    drawControlsHint(paneWidthPx, paneHeightPx, !cornerLabel.startsWith("JUGADOR 2"), 0f);
+                }
             }
         } else if (phase == MatchSimulation.Phase.GOAL_CELEBRATION) {
             String msg = sim.getLastGoalMessage() != null ? sim.getLastGoalMessage() : "GOOOL";
@@ -1136,11 +1295,10 @@ public class MatchScreen implements Screen {
             font.draw(batch, tl, paneWidthPx / 2f - tl.width / 2f, paneHeightPx * 0.08f - 8f + 22f);
             font.getData().setScale((1f) * Fonts.K);
         }
-        // FULL_TIME: el resumen se dibuja a pantalla completa en drawFullTimePanel().
+
         batch.end();
     }
 
-    /** Barras negras arriba y abajo (formato "cine") + barra de progreso durante la repetición. */
     private void drawReplayBars(int paneWidthPx, int paneHeightPx) {
         float bar = paneHeightPx * 0.08f;
         shapes.setProjectionMatrix(hudCam.combined);
@@ -1153,17 +1311,208 @@ public class MatchScreen implements Screen {
         shapes.end();
     }
 
-    /** Recordatorio breve de controles, mostrado solo durante el saque inicial del partido (tutorial mínimo in-context). */
-    private void drawControlsHint(int paneWidthPx, int paneHeightPx, boolean isPlayerOne) {
+    private float miniMapWidth() {
+        return Constants.MINIMAP_WIDTH_PX * uiScale;
+    }
+
+    private float miniMapHeight() {
+        float worldW = Constants.FIELD_WIDTH + Constants.GOAL_DEPTH * 2f;
+        return miniMapWidth() * Constants.FIELD_HEIGHT / worldW;
+    }
+
+    private void drawBallPointer(int w, int h) {
+        OrthographicCamera cam = overlayCam;
+        if (cam == null) {
+            return;
+        }
+        float nx = (rBall.x - cam.position.x) / cam.viewportWidth + 0.5f;
+        float ny = (rBall.y - cam.position.y) / cam.viewportHeight + 0.5f;
+        if (nx > 0.04f && nx < 0.96f && ny > 0.05f && ny < 0.95f) {
+            return;
+        }
+        float inset = 34f * uiScale;
+        float cx = w / 2f, cy = h / 2f;
+        float dx = (nx - 0.5f) * w, dy = (ny - 0.5f) * h;
+        float tx = dx == 0f ? 1e9f : (dx > 0 ? (w / 2f - inset) / dx : (-w / 2f + inset) / dx);
+        float ty = dy == 0f ? 1e9f : (dy > 0 ? (h / 2f - inset) / dy : (-h / 2f + inset) / dy);
+        float t = Math.min(tx, ty);
+        float px = cx + dx * t, py = cy + dy * t;
+        float len = (float) Math.sqrt(dx * dx + dy * dy);
+        float ux = dx / len, uy = dy / len;
+        float r = 15f * uiScale;
+
+        shapes.setProjectionMatrix(hudCam.combined);
+        shapes.begin(ShapeRenderer.ShapeType.Filled);
+        shapes.setColor(0f, 0f, 0f, 0.65f);
+        shapes.triangle(px + ux * (r + 4f), py + uy * (r + 4f),
+                px - ux * (r - 2f) - uy * (r + 3f), py - uy * (r - 2f) + ux * (r + 3f),
+                px - ux * (r - 2f) + uy * (r + 3f), py - uy * (r - 2f) - ux * (r + 3f));
+        shapes.setColor(1f, 0.85f, 0.15f, 0.95f);
+        shapes.triangle(px + ux * r, py + uy * r,
+                px - ux * (r - 4f) - uy * r * 0.8f, py - uy * (r - 4f) + ux * r * 0.8f,
+                px - ux * (r - 4f) + uy * r * 0.8f, py - uy * (r - 4f) - ux * r * 0.8f);
+        shapes.end();
+
+        Vector2 selfPos = overlaySelfIsLeft ? rPlayerL : rPlayerR;
+        String txt = Math.round(selfPos.dst(rBall)) + " m";
+        batch.setProjectionMatrix(hudCam.combined);
+        batch.begin();
+        font.getData().setScale(0.8f * Fonts.K);
+        GlyphLayout gl = new GlyphLayout(font, txt);
+        float lx = MathUtils.clamp(px - ux * (r + 22f * uiScale) - gl.width / 2f, 4f, w - gl.width - 4f);
+        float ly = MathUtils.clamp(py - uy * (r + 14f * uiScale) + gl.height / 2f, gl.height + 4f, h - 4f);
+        font.setColor(0f, 0f, 0f, 0.8f);
+        font.draw(batch, gl, lx + 1f, ly - 1f);
+        font.setColor(1f, 0.92f, 0.4f, 1f);
+        font.draw(batch, gl, lx, ly);
+        font.getData().setScale(Fonts.K);
+        batch.end();
+    }
+
+    private void drawMiniMap(int paneAreaHeight) {
+        if (sim.getPhase() == MatchSimulation.Phase.FULL_TIME) {
+            return;
+        }
+        Gdx.gl.glViewport(0, 0, screenWidth, screenHeight);
+        hudCam.setToOrtho(false, screenWidth, screenHeight);
+        hudCam.update();
+        shapes.setProjectionMatrix(hudCam.combined);
+
+        float mw = miniMapWidth(), mh = miniMapHeight();
+        float x0 = (screenWidth - mw) / 2f, y0 = 8f * uiScale;
+        float worldW = Constants.FIELD_WIDTH + Constants.GOAL_DEPTH * 2f;
+        float sc = mw / worldW;
+        float cx = x0 + mw / 2f, cy = y0 + mh / 2f;
+
+        shapes.begin(ShapeRenderer.ShapeType.Filled);
+        shapes.setColor(0.03f, 0.18f, 0.06f, 0.62f);
+        shapes.rect(x0, y0, mw, mh);
+
+        shapes.setColor(0.9f, 0.9f, 0.9f, 0.55f);
+        float gh = Constants.GOAL_WIDTH * sc;
+        shapes.rect(x0, cy - gh / 2f, Constants.GOAL_DEPTH * sc, gh);
+        shapes.rect(x0 + mw - Constants.GOAL_DEPTH * sc, cy - gh / 2f, Constants.GOAL_DEPTH * sc, gh);
+        shapes.end();
+
+        shapes.begin(ShapeRenderer.ShapeType.Line);
+        shapes.setColor(1f, 1f, 1f, 0.7f);
+        float fx0 = x0 + Constants.GOAL_DEPTH * sc, fw = Constants.FIELD_WIDTH * sc;
+        shapes.rect(fx0, y0, fw, mh);
+        shapes.line(cx, y0, cx, y0 + mh);
+        shapes.circle(cx, cy, 5f * sc, 16);
+
+        shapes.setColor(1f, 1f, 1f, 0.55f);
+        if (mode.isOnline() || mode == GameMode.ONE_PLAYER || mode.isTeamMode()) {
+            drawCamRect((mode != GameMode.ONLINE_CLIENT) ? camLeft : camRight, cx, cy, sc);
+        } else {
+            shapes.setColor(MatchSetup.leftTeam.color.r, MatchSetup.leftTeam.color.g, MatchSetup.leftTeam.color.b, 0.9f);
+            drawCamRect(camLeft, cx, cy, sc);
+            shapes.setColor(MatchSetup.rightTeam.color.r, MatchSetup.rightTeam.color.g, MatchSetup.rightTeam.color.b, 0.9f);
+            drawCamRect(camRight, cx, cy, sc);
+        }
+        shapes.end();
+
+        shapes.begin(ShapeRenderer.ShapeType.Filled);
+        float dot = 4.2f * uiScale;
+
+        shapes.setColor(0.1f, 0.1f, 0.1f, 1f);
+        shapes.circle(cx + rKeeperL.x * sc, cy + rKeeperL.y * sc, dot * 0.75f, 10);
+        shapes.circle(cx + rKeeperR.x * sc, cy + rKeeperR.y * sc, dot * 0.75f, 10);
+
+        Color lc = MatchSetup.leftTeam.color, rc = MatchSetup.rightTeam.color;
+        shapes.setColor(1f, 1f, 1f, 1f);
+        shapes.circle(cx + rPlayerL.x * sc, cy + rPlayerL.y * sc, dot + 1.5f, 12);
+        shapes.circle(cx + rPlayerR.x * sc, cy + rPlayerR.y * sc, dot + 1.5f, 12);
+        shapes.setColor(lc);
+        shapes.circle(cx + rPlayerL.x * sc, cy + rPlayerL.y * sc, dot, 12);
+        shapes.setColor(rc);
+        shapes.circle(cx + rPlayerR.x * sc, cy + rPlayerR.y * sc, dot, 12);
+        if (sim.hasMates()) {
+            shapes.setColor(1f, 1f, 1f, 1f);
+            shapes.circle(cx + rMateL.x * sc, cy + rMateL.y * sc, dot + 1.5f, 12);
+            shapes.circle(cx + rMateR.x * sc, cy + rMateR.y * sc, dot + 1.5f, 12);
+            shapes.setColor(lc);
+            shapes.circle(cx + rMateL.x * sc, cy + rMateL.y * sc, dot, 12);
+            shapes.setColor(rc);
+            shapes.circle(cx + rMateR.x * sc, cy + rMateR.y * sc, dot, 12);
+            shapes.setColor(TINT_J2);
+            shapes.circle(cx + rMateL.x * sc, cy + rMateL.y * sc, dot * 0.35f, 8);
+            if (mode == GameMode.FOUR_PLAYERS) {
+
+                if (sim.isRightHuman(0)) {
+                    shapes.setColor(TINT_J3);
+                    shapes.circle(cx + rPlayerR.x * sc, cy + rPlayerR.y * sc, dot * 0.35f, 8);
+                }
+                if (sim.isRightHuman(1)) {
+                    shapes.setColor(TINT_J4);
+                    shapes.circle(cx + rMateR.x * sc, cy + rMateR.y * sc, dot * 0.35f, 8);
+                }
+            }
+        }
+
+        shapes.setColor(0f, 0f, 0f, 1f);
+        shapes.circle(cx + rBall.x * sc, cy + rBall.y * sc, dot * 0.8f + 1.5f, 10);
+        shapes.setColor(1f, 1f, 0.85f, 1f);
+        shapes.circle(cx + rBall.x * sc, cy + rBall.y * sc, dot * 0.8f, 10);
+        shapes.end();
+
+        String msg = null;
+        if (escArmedTime > 0f) {
+            msg = "ESC otra vez para salir (se pierde el partido)";
+        } else if (unstuckToast > 0f) {
+            msg = "Pelota trabada: la reubicamos";
+        }
+        if (msg != null) {
+            batch.setProjectionMatrix(hudCam.combined);
+            batch.begin();
+            font.getData().setScale(1.15f * Fonts.K);
+            GlyphLayout gl = new GlyphLayout(font, msg);
+            float ty = paneAreaHeight - 22f * uiScale;
+            font.setColor(0f, 0f, 0f, 0.75f);
+            font.draw(batch, gl, screenWidth / 2f - gl.width / 2f + 2f, ty - 2f);
+            font.setColor(1f, 0.9f, 0.3f, 1f);
+            font.draw(batch, gl, screenWidth / 2f - gl.width / 2f, ty);
+            font.getData().setScale(Fonts.K);
+            batch.end();
+        }
+    }
+
+    private void drawCamRect(OrthographicCamera cam, float cx, float cy, float sc) {
+        float w = cam.viewportWidth * sc, h = cam.viewportHeight * sc;
+        shapes.rect(cx + cam.position.x * sc - w / 2f, cy + cam.position.y * sc - h / 2f, w, h);
+    }
+
+    private void drawControlsHint(int paneWidthPx, int paneHeightPx, boolean isPlayerOne, float extraY) {
         String hint = isPlayerOne
                 ? "WASD mover | SHIFT correr | ESPACIO cargar/patear | CTRL planchazo"
                 : "Flechas mover | CTRL correr | ENTER cargar/patear | SHIFT planchazo";
+        drawHintLine(paneWidthPx, hint, extraY);
+    }
+
+    private String teamHintLine(int line) {
+        if (line == 0) {
+            return "J1 (azul):  WASD mover | SHIFT correr | ESPACIO cargar/patear | CTRL planchazo";
+        }
+        if (line == 1) {
+            return "J2 (celeste):  Flechas o IJKL mover | CTRL der. o N correr | ENTER o , cargar/patear | SHIFT der. o . planchazo";
+        }
+        int pads = Gamepads.count();
+        if (mode == GameMode.FOUR_PLAYERS) {
+            return "J3 (naranja) y J4 (violeta): con mando (A patear, X planchazo, B correr). Conectados: " + pads
+                    + (pads >= 2 ? "" : " - los que falten los juega la CPU");
+        }
+        return "Mando: stick o cruceta mover | A cargar/patear | X planchazo | B correr | START pausa"
+                + (pads > 0 ? "  (" + pads + " conectado" + (pads > 1 ? "s" : "") + ")" : "");
+    }
+
+    private void drawHintLine(int paneWidthPx, String hint, float extraY) {
         font.getData().setScale((0.85f) * Fonts.K);
         GlyphLayout layout = new GlyphLayout(font, hint);
         font.setColor(0f, 0f, 0f, 0.6f);
-        font.draw(batch, layout, paneWidthPx / 2f - layout.width / 2f + 1f, 64f);
+        float hintY = miniMapHeight() + 24f * uiScale + extraY;
+        font.draw(batch, layout, paneWidthPx / 2f - layout.width / 2f + 1f, hintY - 1f);
         font.setColor(1f, 1f, 1f, 0.9f);
-        font.draw(batch, layout, paneWidthPx / 2f - layout.width / 2f, 65f);
+        font.draw(batch, layout, paneWidthPx / 2f - layout.width / 2f, hintY);
         font.getData().setScale((1f) * Fonts.K);
     }
 
@@ -1190,10 +1539,6 @@ public class MatchScreen implements Screen {
         }
         return (sl > sr ? "GANA " + MatchSetup.leftTeam.name + " " : "GANA " + MatchSetup.rightTeam.name + " ") + sl + " - " + sr;
     }
-
-    // ------------------------------------------------------------------
-    // Barra superior compartida: reloj, marcador y título del partido
-    // ------------------------------------------------------------------
 
     private void drawSharedHud(int hudY, int hudHeight) {
         Gdx.gl.glViewport(0, hudY, screenWidth, hudHeight);
@@ -1222,7 +1567,6 @@ public class MatchScreen implements Screen {
         shapes.rect(panelX, panelY, panelW, panelH);
         shapes.end();
 
-        // Reloj estilizado a la izquierda.
         float clockCx = 44f;
         float clockCy = hudHeight / 2f;
         shapes.begin(ShapeRenderer.ShapeType.Filled);
@@ -1254,7 +1598,7 @@ public class MatchScreen implements Screen {
 
         String timeText = "TIME: " + formatTime(sim.getHalfTimeRemaining());
         font.getData().setScale((1.05f) * Fonts.K);
-        // MK6: en los últimos 10 s de juego el reloj se pone rojo y titila.
+
         boolean lastSeconds = sim.getPhase() == MatchSimulation.Phase.PLAYING && sim.getHalfTimeRemaining() <= 10f;
         if (lastSeconds) {
             boolean on = ((int) (animTime * 3f)) % 2 == 0;
@@ -1274,7 +1618,6 @@ public class MatchScreen implements Screen {
             font.draw(batch, g.substring(1), 12f, hudHeight - 8f - (i - first) * 15f);
         }
 
-        // MK6: logo del club a la derecha de la barra superior.
         if (game.logo != null) {
             float ls = hudHeight - 8f;
             batch.setColor(Color.WHITE);
@@ -1287,11 +1630,10 @@ public class MatchScreen implements Screen {
         drawPossessionBar(centerX, panelY);
     }
 
-    /** MK6: compara el marcador con el último visto y anota quién convirtió y cuándo (tiempo de partido transcurrido). */
     private void updateGoalLog() {
         int sl = sim.getScoreLeft();
         int sr = sim.getScoreRight();
-        if (sl + sr < goalLogLeft + goalLogRight) { // partido nuevo (revancha / reinicio)
+        if (sl + sr < goalLogLeft + goalLogRight) {
             goalLog.clear();
         } else if (sl + sr > goalLogLeft + goalLogRight) {
             float dur = Settings.halfDurationSeconds();
@@ -1308,7 +1650,6 @@ public class MatchScreen implements Screen {
         goalLogRight = sr;
     }
 
-    /** Barrita fina de posesión (azul vs. rojo) debajo del marcador — noción simple de "quién domina el partido". */
     private void drawPossessionBar(float centerX, float panelY) {
         float barW = 200f;
         float barH = 6f;
@@ -1324,7 +1665,6 @@ public class MatchScreen implements Screen {
         shapes.rect(x + leftW, y, barW - leftW, barH);
         shapes.end();
 
-        // MK6: porcentaje a cada lado de la barra.
         batch.begin();
         font.getData().setScale((0.7f) * Fonts.K);
         GlyphLayout ll = new GlyphLayout(font, leftPct + "%");
@@ -1392,7 +1732,6 @@ public class MatchScreen implements Screen {
         shapes.end();
     }
 
-    /** MK4: pantalla final a pantalla completa — resultado, estadísticas por equipo y mejor jugador. */
     private void drawFullTimePanel() {
         Gdx.gl.glViewport(0, 0, screenWidth, screenHeight);
         hudCam.setToOrtho(false, screenWidth, screenHeight);
@@ -1410,8 +1749,10 @@ public class MatchScreen implements Screen {
         MatchStats st = sim.getStats();
         float[] ratings = st.ratings(sl, sr);
         int mvp = st.mvpIndex(sl, sr);
-        String[] names = {MatchSetup.leftName, Constants.KEEPER_LEFT_NAME,
-                MatchSetup.rightName, Constants.KEEPER_RIGHT_NAME};
+        String leftLabel = sim.hasMates() ? "EQUIPO " + MatchSetup.leftTeam.name : MatchSetup.leftName;
+        String rightLabel = sim.hasMates() ? "EQUIPO " + MatchSetup.rightTeam.name : MatchSetup.rightName;
+        String[] names = {leftLabel, Constants.KEEPER_LEFT_NAME,
+                rightLabel, Constants.KEEPER_RIGHT_NAME};
         String[] roles = {"CAMPO", "ARQUERO", "CAMPO", "ARQUERO"};
 
         shapes.begin(ShapeRenderer.ShapeType.Filled);
@@ -1419,7 +1760,7 @@ public class MatchScreen implements Screen {
         shapes.rect(0, 0, screenWidth, screenHeight);
         shapes.setColor(0.08f, 0.09f, 0.13f, 0.98f);
         shapes.rect(px, py, pw, ph);
-        // Banda del MVP.
+
         float mvpBandH = 46f * k;
         float mvpBandY = py + 44f * k;
         shapes.setColor(0.35f, 0.28f, 0.05f, 1f);
@@ -1483,7 +1824,7 @@ public class MatchScreen implements Screen {
 
         drawCentered("MEJOR JUGADOR: " + names[mvp] + "  -  " + String.format("%.1f", ratings[mvp]),
                 cx, mvpBandY + mvpBandH - 12f * k, 1.3f * k, new Color(1f, 0.9f, 0.3f, 1f));
-        String fullTimeHint = "R reiniciar   -   ESC menú principal";
+        String fullTimeHint = "R reiniciar   -   ESC menú principal" + (Gamepads.count() > 0 ? "   -   START (mando) menú" : "");
         if (mode == GameMode.ONLINE_HOST) fullTimeHint = "R revancha   -   ESC menú principal";
         if (mode == GameMode.ONLINE_CLIENT) fullTimeHint = "Esperando revancha del host   -   ESC menú principal";
         drawCentered(fullTimeHint, cx, py + 30f * k, 0.9f * k, new Color(0.85f, 0.85f, 0.85f, 1f));
@@ -1491,7 +1832,6 @@ public class MatchScreen implements Screen {
         batch.end();
     }
 
-    /** Texto centrado horizontalmente en {@code cx}, con {@code topY} como borde superior del texto. Debe estar dentro de batch.begin(). */
     private void drawCentered(String text, float cx, float topY, float scale, Color color) {
         font.getData().setScale((scale) * Fonts.K);
         GlyphLayout gl = new GlyphLayout(font, text);
@@ -1548,6 +1888,7 @@ public class MatchScreen implements Screen {
 
     @Override
     public void hide() {
+        Fonts.setUiScale(1f);
         closeNetwork();
     }
 
@@ -1569,6 +1910,7 @@ public class MatchScreen implements Screen {
         texCrowd.dispose();
         texShadow.dispose();
         texRing.dispose();
+        texHalo.dispose();
         if (blurShader != null) blurShader.dispose();
         if (sfxCheer != null) sfxCheer.dispose();
         if (sfxDive != null) sfxDive.dispose();
