@@ -6,6 +6,7 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
 
+/** Prueba mínima por loopback, sin LibGDX. Correr con main(). */
 public class NetSelfTest {
 
     static int fails = 0;
@@ -50,7 +51,7 @@ public class NetSelfTest {
         client.sendInput(in);
         in.kickHeld = false; in.kickReleased = true;
         client.sendInput(in);
-        in.kickReleased = false; in.moveX = 0.25f;
+        in.kickReleased = false; in.moveX = 0.25f;   // frame siguiente, sin el evento
         client.sendInput(in);
         pump(host, client, 100);
 
@@ -60,6 +61,7 @@ public class NetSelfTest {
         check("kickReleased no se pierde (pegajoso)", got.kickReleased);
         check("kickReleased se consume una vez", !host.consumeInput().kickReleased);
 
+        // --- Snapshot host -> cliente ---
         Snapshot a = new Snapshot();
         a.tick = 5; a.phase = 1; a.half = 2; a.scoreLeft = 3; a.scoreRight = 1; a.possessionLeft = 62;
         a.lastGoalByLeft = true; a.halfTimeRemaining = 91.5f; a.phaseTimer = 2.5f; a.replayProgress = 0.4f;
@@ -70,6 +72,9 @@ public class NetSelfTest {
         a.ky[1] = -0.5f; a.kvy[1] = -1f; a.kdive[1] = 0f; a.kdiving[1] = false;
         a.kickCount = 7; a.slideCount = 2; a.saveCount = 1; a.lastKickPower = 0.66f;
         a.shots[0] = 4; a.shotsOnTarget[1] = 2; a.tackles[0] = 3; a.saves[1] = 5;
+        // MK8: faltas
+        a.advantageTeam = 1; a.advantageCount = 2; a.foulCount = 3; a.foulerIdx = 1; a.foulCard = 2; a.foulType = 1; a.foulPenalty = true; a.foulX = 17.5f; a.foulY = -2.25f;
+        a.fouls[0] = 2; a.fouls[1] = 4; a.yellows[1] = 1; a.reds[1] = 1; a.suspended[1] = true; a.suspendRemaining[1] = 17.5f;
         host.sendSnapshot(a);
         pump(host, client, 100);
         Snapshot b = new Snapshot();
@@ -85,9 +90,14 @@ public class NetSelfTest {
                 && b.kickCount == 7 && b.slideCount == 2 && b.saveCount == 1 && b.lastKickPower == 0.66f
                 && b.shots[0] == 4 && b.shotsOnTarget[1] == 2 && b.tackles[0] == 3 && b.saves[1] == 5;
         check("snapshot llega idéntico (todos los campos)", same);
+        boolean sameFouls = b.foulCount == 3 && b.foulerIdx == 1 && b.foulCard == 2 && b.foulType == 1 && b.foulPenalty
+                && b.foulX == 17.5f && b.foulY == -2.25f && b.fouls[0] == 2 && b.fouls[1] == 4 && b.yellows[0] == 0
+                && b.yellows[1] == 1 && b.reds[1] == 1 && !b.suspended[0] && b.suspended[1] && b.suspendRemaining[1] == 17.5f;
+        check("MK8: faltas, tarjetas y expulsión llegan idénticas", sameFouls);
+        check("MK8: la ventaja llega idéntica", b.advantageTeam == 1 && b.advantageCount == 2);
         check("sin snapshot nuevo no devuelve nada", !client.takeSnapshot(b));
 
-        a.tick = 3; a.scoreLeft = 99;
+        a.tick = 3; a.scoreLeft = 99;               // más viejo: debe descartarse
         host.sendSnapshot(a);
         pump(host, client, 60);
         check("snapshot viejo descartado", !client.takeSnapshot(b));
@@ -96,6 +106,7 @@ public class NetSelfTest {
         pump(host, client, 60);
         check("snapshot más nuevo aceptado", client.takeSnapshot(b) && b.scoreLeft == 4);
 
+        // Simula ~40 s de partido a 30 Hz con input constante en el cliente: nada se cae ni se satura
         int received = 0;
         for (int i = 0; i < 1200; i++) {
             a.tick = 100 + i;
@@ -108,11 +119,13 @@ public class NetSelfTest {
         check("1200 snapshots seguidos: llegan >95%", received > 1140);
         check("sigue conectado", client.isConnected() && host.hasClient());
 
-        pump(host, client, 1300);
+        // --- MK5: ping medido por PING/PONG ---
+        pump(host, client, 1300); // el cliente manda un PING por segundo
         check("cliente mide ping (loopback < 50 ms)", client.getPingMs() >= 0 && client.getPingMs() < 50);
-        pump(host, client, 1200);
+        pump(host, client, 1200); // el segundo PING ya lleva el ping medido
         check("host conoce el ping del cliente", host.getClientPingMs() >= 0 && host.getClientPingMs() < 50);
 
+        // --- MK5: interpolación de snapshots ---
         SnapshotInterpolator ip = new SnapshotInterpolator();
         Snapshot out = new Snapshot();
         check("interpolador vacío no devuelve nada", !ip.sample(0, out));
@@ -124,20 +137,21 @@ public class NetSelfTest {
         long d = SnapshotInterpolator.DELAY_NANOS;
         check("interpolador: mitad de camino", ip.sample(1000 * ms + d + 16 * ms + ms / 2, out)
                 && Math.abs(out.ballX - 0.5f) < 0.01f && Math.abs(out.px[0] - 1f) < 0.02f && Math.abs(out.ky[0] - 0.5f) < 0.01f);
-        ip.sample(1000 * ms + d + 6 * ms, out);
+        ip.sample(1000 * ms + d + 6 * ms, out);   // alpha ~0.2: más cerca del primero
         boolean discreteA = out.scoreLeft == 0;
-        ip.sample(1000 * ms + d + 30 * ms, out);
+        ip.sample(1000 * ms + d + 30 * ms, out);  // alpha ~0.9: más cerca del segundo
         check("interpolador: dato discreto del más cercano", discreteA && out.scoreLeft == 1);
         ip.sample(1000 * ms + d - 50 * ms, out);
         check("interpolador: antes del primero devuelve el primero", out.ballX == 0f);
         ip.sample(1033 * ms + d + 50 * ms, out);
         check("interpolador: sin futuro extrapola poco, sin pasarse", out.ballX >= 1f && out.ballX < 1.5f);
 
-        Snapshot s3 = new Snapshot(); s3.tick = 3; s3.ballX = 1f; s3.px[0] = -9f; s3.pvx[0] = 0f;
+        Snapshot s3 = new Snapshot(); s3.tick = 3; s3.ballX = 1f; s3.px[0] = -9f; s3.pvx[0] = 0f; // saque: salto de 11 m
         ip.push(s3, 1066 * ms);
         ip.sample(1033 * ms + d + 16 * ms, out);
         check("interpolador: teletransporte no se interpola", out.px[0] == -9f);
 
+        // Orden circular: más de 8 snapshots no rompen el buffer
         SnapshotInterpolator ring = new SnapshotInterpolator();
         for (int i = 0; i < 20; i++) {
             Snapshot s = new Snapshot(); s.tick = i; s.ballX = i;
@@ -146,21 +160,25 @@ public class NetSelfTest {
         ring.sample((2000 + 15 * 33L) * ms + d + 16 * ms, out);
         check("interpolador: buffer circular (bola entre 15 y 16)", out.ballX > 15f && out.ballX < 16f);
 
+        // Paquete basura y NaN no rompen nada
         DatagramChannel evil = DatagramChannel.open();
         evil.send(ByteBuffer.wrap(new byte[]{1, 2, 3}), new InetSocketAddress("127.0.0.1", port));
         pump(host, client, 50);
         check("basura ignorada", host.hasClient());
 
+        // Un segundo cliente no puede entrar
         NetClient other = new NetClient();
         other.connect("127.0.0.1", port);
         pump(host, other, 300);
         check("segundo cliente rechazado", !other.isConnected());
         other.close();
 
+        // Despedida
         client.close();
         pump(host, client, 100);
         check("host detecta BYE", !host.hasClient());
 
+        // Conectar a un puerto donde no hay host -> falla sin colgarse
         host.close();
         NetClient lost = new NetClient();
         lost.connect("127.0.0.1", port);

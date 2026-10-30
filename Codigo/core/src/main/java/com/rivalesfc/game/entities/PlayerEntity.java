@@ -11,23 +11,36 @@ import com.badlogic.gdx.physics.box2d.World;
 import com.rivalesfc.game.Constants;
 import com.rivalesfc.game.input.PlayerInput;
 
+/**
+ * Un jugador en cancha. En la Etapa 1 solo existe el jugador controlado por el
+ * humano (sin IA de soporte todavía, sin equipos); esta clase ya deja lugar
+ * para diferenciar humano/IA vía el flag {@code humanControlled}, que en la
+ * Etapa 3 (2 vs 2, secc. 2.1) decidirá si el movimiento viene de teclado/red o
+ * de la máquina de estados de IA descripta en la sección 1.2 de la propuesta.
+ */
 public class PlayerEntity {
 
     public final Body body;
     public final Color teamColor;
     public boolean humanControlled = true;
 
+    /** Potencia acumulada mientras se mantiene presionado el botón de pateo (0..1). */
     private float kickChargeTime = 0f;
 
+    // --- Planchazo / barrida ---
+    /** Última dirección de movimiento no nula, usada como dirección del planchazo si el jugador está quieto. */
     private final Vector2 lastMoveDir = new Vector2(1f, 0f);
     private final Vector2 slideDirection = new Vector2();
     private boolean sliding = false;
     private float slideTimer = 0f;
     private float slideCooldown = 0f;
-
+    /** MK5: tiempo restante tirado en el piso tras un planchazo (sin moverse ni patear). */
     private float recoveryTimer = 0f;
-
+    /** Evita que un mismo planchazo "toque" la pelota varias veces (una vez por planchazo). */
     private boolean slideBallTouched = false;
+
+    /** MK8: expulsado (roja). Mientras dure, el cuerpo está desactivado (no colisiona) y no se dibuja. */
+    private boolean suspended = false;
 
     public PlayerEntity(World world, Vector2 startPosition, Color teamColor) {
         this.teamColor = teamColor;
@@ -36,7 +49,7 @@ public class PlayerEntity {
         bd.type = BodyDef.BodyType.DynamicBody;
         bd.position.set(startPosition);
         bd.linearDamping = Constants.PLAYER_LINEAR_DAMPING;
-        bd.fixedRotation = true;
+        bd.fixedRotation = true; // el sprite del jugador no debe "rodar"
 
         body = world.createBody(bd);
 
@@ -58,16 +71,25 @@ public class PlayerEntity {
         return body.getPosition();
     }
 
+    /**
+     * Aplica el movimiento correspondiente a un tick de simulación (30 Hz, secc. 2.3).
+     * Usa fuerza (no velocidad directa) para que el movimiento se sienta con inercia,
+     * y limita la velocidad máxima según haya o no sprint.
+     *
+     * Si el jugador está en medio de un planchazo, este método NO lee el input de
+     * movimiento (no se puede re-dirigir en pleno planchazo): solo actualiza los
+     * temporizadores de la barrida.
+     */
     public void applyInput(PlayerInput input, float dt) {
         updateSlideTimers(dt);
 
         if (sliding) {
-            kickChargeTime = 0f;
+            kickChargeTime = 0f; // no se puede cargar un remate mientras se está tirado al piso
             return;
         }
 
         if (recoveryTimer > 0f) {
-
+            // MK5: levantándose tras el planchazo; un planchazo errado deja al jugador vulnerable.
             recoveryTimer -= dt;
             kickChargeTime = 0f;
             return;
@@ -77,7 +99,8 @@ public class PlayerEntity {
         if (dir.len2() > 0f) {
             dir.nor();
             lastMoveDir.set(dir);
-
+            // MK7 (fix): sin esta multiplicación la velocidad terminal era ~8 m/s con o sin Shift (fuerza 45 N,
+            // masa ~0,94 kg, damping 6), y el sprint de 10,5 m/s no se alcanzaba nunca.
             float force = Constants.PLAYER_ACCEL_FORCE * (input.sprint ? Constants.PLAYER_SPRINT_ACCEL_MULT : 1f);
             body.applyForceToCenter(dir.scl(force), true);
         }
@@ -86,7 +109,8 @@ public class PlayerEntity {
         Vector2 v = body.getLinearVelocity();
         float speed = v.len();
         if (speed > maxSpeed) {
-
+            // MK7 (fix): al soltar Shift la velocidad se recortaba de golpe de 10,5 a 7,5 m/s (frenazo seco).
+            // Ahora baja de a poco (10 % por tick) hasta el tope de caminar.
             float target = Math.max(maxSpeed, speed * 0.90f);
             v.nor().scl(target);
             body.setLinearVelocity(v);
@@ -95,7 +119,8 @@ public class PlayerEntity {
         if (input.kickHeld) {
             kickChargeTime = Math.min(Constants.KICK_CHARGE_TIME, kickChargeTime + dt);
         } else if (!input.kickReleased) {
-
+            // MK4 (fix): en el tick del "soltar" la carga NO se borra acá; se consume en el pateo.
+            // Antes se ponía en 0 justo antes de leer la potencia, y todos los remates salían con potencia 0.
             kickChargeTime = 0f;
         }
 
@@ -124,7 +149,7 @@ public class PlayerEntity {
                 sliding = false;
                 slideCooldown = Constants.SLIDE_COOLDOWN;
                 recoveryTimer = Constants.SLIDE_RECOVERY_TIME;
-
+                // Frena un poco al levantarse, para que no siga "patinando" a máxima velocidad.
                 Vector2 v = body.getLinearVelocity();
                 body.setLinearVelocity(v.x * Constants.SLIDE_RECOVERY_BRAKE, v.y * Constants.SLIDE_RECOVERY_BRAKE);
             }
@@ -133,12 +158,14 @@ public class PlayerEntity {
         }
     }
 
+    /** Devuelve la potencia acumulada (0..1) y reinicia la carga. Se llama al soltar el botón de pateo. */
     public float consumeKickPower() {
         float p = getKickPower();
         kickChargeTime = 0f;
         return p;
     }
 
+    /** Limpia estados transitorios (planchazo, carga) al reposicionar para un saque. */
     public void resetState() {
         sliding = false;
         slideTimer = 0f;
@@ -148,27 +175,35 @@ public class PlayerEntity {
         slideBallTouched = false;
     }
 
+    /** Solo para la repetición: fuerza el estado visual de planchazo. */
     public void setReplaySliding(boolean value) {
         sliding = value;
     }
 
+    /** Solo para el cliente online: muestra la barra de carga que informa el host. */
     public void setDisplayKickPower(float power) {
         kickChargeTime = Math.max(0f, Math.min(1f, power)) * Constants.KICK_CHARGE_TIME;
     }
 
+    /** Potencia de pateo actual, en 0..1, según cuánto tiempo se sostuvo el botón. */
     public float getKickPower() {
         return kickChargeTime / Constants.KICK_CHARGE_TIME;
     }
 
+    /** MK5: true mientras está en el piso tras un planchazo (no puede moverse ni patear). */
     public boolean isRecovering() {
         return recoveryTimer > 0f;
     }
 
+    /** MK5: alcance del planchazo a la pelota (más corto que el de pateo). */
     public boolean isSlideReaching(Ball ball) {
         return getPosition().dst(ball.getPosition()) <= Constants.SLIDE_REACH + Constants.BALL_RADIUS;
     }
 
     public boolean isNear(Ball ball) {
+        if (suspended) {
+            return false;
+        }
         float dist = getPosition().dst(ball.getPosition());
         return dist <= Constants.KICK_RANGE + Constants.BALL_RADIUS;
     }
@@ -177,23 +212,57 @@ public class PlayerEntity {
         return sliding;
     }
 
+    /** Fracción 0..1 de cuánto falta del planchazo actual (0 = recién arrancó, 1 = terminando). Útil para animarlo. */
     public float getSlideProgress() {
         return sliding ? 1f - MathUtils.clamp(slideTimer / Constants.SLIDE_DURATION, 0f, 1f) : 0f;
     }
 
+    /** MK6: 0..1 de cuánto falta para volver a poder hacer planchazo (0 = listo). Solo es fiable donde corre la simulación. */
     public float getSlideCooldownFraction() {
         return MathUtils.clamp(slideCooldown / Constants.SLIDE_COOLDOWN, 0f, 1f);
+    }
+
+    /** MK8: hacia dónde miraría un planchazo ahora (última dirección de movimiento). Lo usa la IA para no barrer a ciegas. */
+    public Vector2 getFacing() {
+        return lastMoveDir;
     }
 
     public Vector2 getSlideDirection() {
         return slideDirection;
     }
 
+    /** true si este planchazo todavía no le "ganó" la pelota a nadie (para aplicar el efecto una sola vez). */
     public boolean canWinBallThisSlide() {
         return sliding && !slideBallTouched;
     }
 
     public void markSlideBallTouched() {
         slideBallTouched = true;
+    }
+
+    /** MK8: true si en el planchazo actual ya tocó la pelota (entrada limpia). */
+    public boolean hasTouchedBallThisSlide() {
+        return slideBallTouched;
+    }
+
+    /** MK8: true mientras está expulsado. */
+    public boolean isSuspended() {
+        return suspended;
+    }
+
+    /**
+     * MK8: expulsa o reincorpora al jugador. Al expulsarlo se desactiva el cuerpo (no colisiona ni empuja).
+     * Llamar siempre fuera de {@code world.step()}: cambiar el estado de un cuerpo en medio del paso es inseguro.
+     */
+    public void setSuspended(boolean value) {
+        if (suspended == value) {
+            return;
+        }
+        suspended = value;
+        resetState();
+        if (value) {
+            body.setLinearVelocity(0f, 0f);
+        }
+        body.setActive(!value);
     }
 }

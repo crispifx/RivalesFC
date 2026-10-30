@@ -10,6 +10,10 @@ import com.badlogic.gdx.physics.box2d.PolygonShape;
 import com.badlogic.gdx.physics.box2d.World;
 import com.rivalesfc.game.Constants;
 
+/**
+ * Cancha reglamentaria simplificada: cuatro bordes (con dos huecos para los arcos)
+ * y dos sensores de gol. Todo estático, sin body dinámico.
+ */
 public class Field {
 
     public final float width = Constants.FIELD_WIDTH;
@@ -34,22 +38,28 @@ public class Field {
         float halfH = height / 2f;
         float goalHalf = Constants.GOAL_WIDTH / 2f;
 
+        // MK7: esquinas ochavadas (corte a 45 grados de c metros) para que la pelota no quede trabada.
         float c = Constants.FIELD_CORNER_CUT;
 
+        // Borde superior e inferior (sin las esquinas)
         addEdge(body, -halfW + c, halfH, halfW - c, halfH);
         addEdge(body, -halfW + c, -halfH, halfW - c, -halfH);
 
+        // Diagonales de las cuatro esquinas
         addEdge(body, -halfW, halfH - c, -halfW + c, halfH);
         addEdge(body, halfW - c, halfH, halfW, halfH - c);
         addEdge(body, -halfW, -halfH + c, -halfW + c, -halfH);
         addEdge(body, halfW - c, -halfH, halfW, -halfH + c);
 
+        // Borde izquierdo, con hueco para el arco
         addEdge(body, -halfW, halfH - c, -halfW, goalHalf);
         addEdge(body, -halfW, -goalHalf, -halfW, -halfH + c);
 
+        // Borde derecho, con hueco para el arco
         addEdge(body, halfW, halfH - c, halfW, goalHalf);
         addEdge(body, halfW, -goalHalf, halfW, -halfH + c);
 
+        // "Fondo" del arco (para que la pelota no siga viajando al infinito tras el gol)
         addEdge(body, -halfW - Constants.GOAL_DEPTH, goalHalf, -halfW - Constants.GOAL_DEPTH, -goalHalf);
         addEdge(body, halfW + Constants.GOAL_DEPTH, goalHalf, halfW + Constants.GOAL_DEPTH, -goalHalf);
         addEdge(body, -halfW - Constants.GOAL_DEPTH, goalHalf, -halfW, goalHalf);

@@ -7,6 +7,18 @@ import com.badlogic.gdx.files.FileHandle;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
+/**
+ * Genera efectos de sonido cortos en tiempo de ejecución (ondas cuadradas /
+ * senoidales sintetizadas a mano, sin descargar ni empaquetar ningún .wav o
+ * .mp3), siguiendo la misma filosofía que {@code gfx/PixelArtFactory}: este
+ * entorno no tiene acceso a internet, así que el "arte sonoro" también se
+ * genera por código.
+ *
+ * Cada tono se arma como un WAV PCM de 16 bits en memoria y se escribe a un
+ * archivo temporal local (libGDX no permite crear un {@code Sound} a partir
+ * de bytes en memoria, solo desde un {@link FileHandle}), que se borra al
+ * salir del juego.
+ */
 public final class AudioFactory {
 
     private static final int SAMPLE_RATE = 22050;
@@ -14,16 +26,19 @@ public final class AudioFactory {
     private AudioFactory() {
     }
 
+    /** Pitido simple (patea/golpea la pelota): un tono corto que sube de tono con la potencia. */
     public static Sound kickTone(float power) {
         float freqStart = 220f + power * 260f;
         float freqEnd = freqStart * 1.6f;
         return synth(0.09f, freqStart, freqEnd, Wave.SQUARE, 0.35f);
     }
 
+    /** Golpe seco y grave para el planchazo/barrida. */
     public static Sound thudTone() {
         return synth(0.12f, 140f, 70f, Wave.TRIANGLE, 0.5f);
     }
 
+    /** Silbato de arranque/entretiempo: dos tonos agudos cortos. */
     public static Sound whistleTone() {
         ByteArrayOutputStream pcm = new ByteArrayOutputStream();
         appendTone(pcm, 0.12f, 1800f, 1800f, Wave.SQUARE, 0.3f);
@@ -32,8 +47,17 @@ public final class AudioFactory {
         return toSound(pcm);
     }
 
+    /** MK8: aviso suave de "ventaja": dos notas cortas ascendentes (sin silbato, el juego sigue). */
+    public static Sound advantageTone() {
+        ByteArrayOutputStream pcm = new ByteArrayOutputStream();
+        appendTone(pcm, 0.07f, 660f, 660f, Wave.TRIANGLE, 0.28f);
+        appendTone(pcm, 0.10f, 880f, 880f, Wave.TRIANGLE, 0.28f);
+        return toSound(pcm);
+    }
+
+    /** Pequeño "fanfarreo" ascendente de 4 notas para festejar un gol. */
     public static Sound goalFanfare() {
-        float[] notes = {523.25f, 659.25f, 783.99f, 1046.5f};
+        float[] notes = {523.25f, 659.25f, 783.99f, 1046.5f}; // C5 E5 G5 C6
         ByteArrayOutputStream pcm = new ByteArrayOutputStream();
         for (float note : notes) {
             appendTone(pcm, 0.11f, note, note, Wave.SQUARE, 0.32f);
@@ -41,22 +65,26 @@ public final class AudioFactory {
         return toSound(pcm);
     }
 
+    /** Bip corto y grave para el pitazo final. */
     public static Sound fullTimeTone() {
         return synth(0.5f, 300f, 180f, Wave.TRIANGLE, 0.35f);
     }
 
+    /** MK4: ruido filtrado a lo bruto con envolvente, para el "uuuh" del público al festejar un gol. */
     public static Sound crowdCheer() {
         ByteArrayOutputStream pcm = new ByteArrayOutputStream();
         appendNoise(pcm, 1.1f, 0.28f, 0.25f);
         return toSound(pcm);
     }
 
+    /** MK4: "fuuum" corto de la estirada del arquero. */
     public static Sound diveWhoosh() {
         ByteArrayOutputStream pcm = new ByteArrayOutputStream();
         appendNoise(pcm, 0.16f, 0.30f, 0.5f);
         return toSound(pcm);
     }
 
+    /** MK4: toque seco y agudo cuando el arquero ataja un remate. */
     public static Sound saveTone() {
         ByteArrayOutputStream pcm = new ByteArrayOutputStream();
         appendTone(pcm, 0.05f, 900f, 700f, Wave.SQUARE, 0.35f);
@@ -74,7 +102,7 @@ public final class AudioFactory {
                     ? progress / attackFraction
                     : 1f - (progress - attackFraction) / (1f - attackFraction);
             float white = rnd.nextFloat() * 2f - 1f;
-            lowpass += (white - lowpass) * 0.35f;
+            lowpass += (white - lowpass) * 0.35f; // filtro pasa-bajos simple: menos "siseo", más "murmullo"
             short value = (short) (lowpass * volume * env * Short.MAX_VALUE);
             pcm.write(value & 0xFF);
             pcm.write((value >> 8) & 0xFF);
@@ -118,6 +146,7 @@ public final class AudioFactory {
                     break;
             }
 
+            // Envolvente simple (fade-in/out) para evitar "clicks" al empezar/terminar.
             float fade = Math.min(1f, Math.min(i / 200f, (samples - i) / 200f));
             short value = (short) (sample * volume * fade * Short.MAX_VALUE);
 
@@ -141,6 +170,7 @@ public final class AudioFactory {
         }
     }
 
+    /** Envuelve PCM crudo de 16 bits mono en un header WAV válido. */
     private static byte[] wrapAsWav(byte[] pcmData) {
         int byteRate = SAMPLE_RATE * 2;
         int dataSize = pcmData.length;
@@ -152,12 +182,12 @@ public final class AudioFactory {
             writeString(out, "WAVE");
             writeString(out, "fmt ");
             writeInt(out, 16);
-            writeShort(out, (short) 1);
-            writeShort(out, (short) 1);
+            writeShort(out, (short) 1); // PCM
+            writeShort(out, (short) 1); // mono
             writeInt(out, SAMPLE_RATE);
             writeInt(out, byteRate);
-            writeShort(out, (short) 2);
-            writeShort(out, (short) 16);
+            writeShort(out, (short) 2); // block align
+            writeShort(out, (short) 16); // bits per sample
             writeString(out, "data");
             writeInt(out, dataSize);
             out.write(pcmData);

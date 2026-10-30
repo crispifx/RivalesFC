@@ -1,27 +1,24 @@
+# Rivales F.C. — MK8: faltas y menús nuevos
+
+> ## Novedades de la MK8 (detalle y qué NO se verificó en `INFORME_MK8.md`)
+>
+> - **Faltas y tarjetas:** barridas sin tocar la pelota y cargas violentas se sancionan con tiro libre (o **penal** dentro del área), amarilla (grave o 3ª falta) y roja (expulsión de 25 s). Se apaga en Ajustes.
+> - **Menús en pantallas separadas:** menú principal → *Jugar* (modo, nombre, equipos, IP online) / *Ajustes*. Escalan con la ventana y aceptan mouse.
+> - **Ley de la ventaja** y opción de **roja definitiva en 2v2** (Ajustes). La IA ya no se llena de faltas.
+> - **Online:** protocolo v4 (no es compatible con la MK7 ni con una MK8 anterior).
+> - Pruebas: `FoulSelfTest` (sin física), `FoulSimTest` (con física), `NetSelfTest`, `SimSelfTest`.
+
 # Rivales F.C. — MK7: visibilidad y arreglos de jugabilidad
 
-> ## 2 vs 2 local, 4 jugadores y mandos (nuevo en la MK7)
+> ## 2 vs 2 local cooperativo (nuevo en la MK7)
 >
-> Desde el lobby, la tarjeta de la fila 3 alterna con **← →** entre **2 VS 2 COOPERATIVO** y **4 JUGADORES (2 VS 2)**. La tecla `3` arranca el cooperativo y la `4` el de 4 jugadores. Cámara única a pantalla completa, solo local.
+> Desde el lobby: tarjeta **2 VS 2 COOPERATIVO** (o la tecla `3`). **Dos compañeros juegan juntos en el mismo equipo desde el mismo dispositivo** contra un equipo rojo de dos jugadores de IA, con una sola cámara compartida a pantalla completa.
 >
-> **2 VS 2 COOPERATIVO:** dos compañeros en el mismo equipo (azul) contra un equipo rojo de dos jugadores de IA.
-> - **J1:** WASD mover, Shift correr, Espacio cargar/patear, Ctrl izq. planchazo.
-> - **J2 (anillo celeste), dos esquemas a elección que se pueden usar a la vez:** Flechas + Ctrl der. correr + Enter cargar/patear + Shift der. planchazo, **o** `I J K L` + `N` correr + `,` cargar/patear + `.` planchazo. Sirve si el teclado no registra todas las teclas juntas o no tiene Ctrl derecho. La `M` queda libre para silenciar.
+> - **J1 (azul):** WASD mover, Shift correr, Espacio cargar/patear, Ctrl izq. planchazo. **J2 (azul, anillo celeste):** Flechas, Ctrl der. correr, Enter cargar/patear, Shift der. planchazo.
 > - **La IA del rojo se reparte los roles:** el más cercano a la pelota la presiona (con histéresis de 2 m) y el otro apoya (adelante y del lado contrario) o cubre (entre la pelota y su arco). Medido: se mantienen a ~7 m uno del otro.
 > - **Cámara:** apunta al punto medio de los dos compañeros inclinada 45 % hacia la pelota, con 24 m de alto (casi toda la cancha). El minimapa muestra los cuatro; el punto celeste es J2.
-> - Repetición de gol, reposicionamiento, estadísticas y pelota trabada funcionan con los cuatro jugadores. No cambia el protocolo online.
->
-> **4 JUGADORES (2 humanos vs 2 humanos):**
-> - **AZUL:** J1 y J2 con el teclado, igual que arriba (si hay 3er y 4to mando, también pueden usarlos).
-> - **ROJO:** J3 y J4 **con mandos** (anillos naranja y violeta; punto del mismo color en el minimapa).
-> - **Si faltan mandos, la CPU ocupa los lugares libres del rojo:** con 1 mando J3 es humano y J4 es CPU; sin mandos es el cooperativo. Si un mando se desconecta o se enchufa a mitad de partido, ese jugador pasa a CPU o vuelve a ser humano. Si un rojo es humano y el otro CPU, la CPU siempre presiona la pelota.
-> - La cámara se centra en los cuatro jugadores.
->
-> **Mandos (todos los modos):** Xbox, PlayStation, Switch Pro y similares, sin librerías nuevas (se leen con el GLFW que ya trae LibGDX). Se pueden enchufar antes o durante el partido; si algo falla, el juego sigue con teclado.
-> - Stick izquierdo o cruceta mover, **A** (o gatillo derecho) cargar/patear, **X** planchazo, **B / LB / RB / gatillo izq.** correr, **START** pausa (y, al final del partido, volver al menú).
-> - En el lobby se navega con stick/cruceta y A.
-> - El mando 1 es del J1 y el 2 del J2 (en 1 jugador, 2 jugadores, 2v2 y online). En el modo de 4 jugadores los mandos 1 y 2 son del ROJO y el 3 y 4 del azul. El orden lo decide el sistema operativo.
-> - **Sin verificar en pantalla:** el dibujo de los cuatro jugadores, el lobby y los mandos reales; ver `INFORME_MK7.md`.
+> - Repetición de gol, reposicionamiento, estadísticas y pelota trabada funcionan con los cuatro jugadores. **Solo local** (no hay versión online) y no cambia el protocolo.
+> - Los dos humanos comparten el mismo equipo: no hay "2 contra 2 humanos". Si querés 4 humanos (dos por equipo) se puede agregar sobre esta base, pero un solo teclado difícilmente aguanta ocho teclas de movimiento más acciones a la vez.
 
 > ## Qué trae la MK7 (consolida los gráficos suaves de la versión anterior + visibilidad + bugs)
 >

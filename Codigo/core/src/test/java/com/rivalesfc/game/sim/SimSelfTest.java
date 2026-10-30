@@ -9,6 +9,11 @@ import com.rivalesfc.game.Settings;
 import com.rivalesfc.game.ai.SupportAI;
 import com.rivalesfc.game.input.PlayerInput;
 
+/**
+ * MK7: pruebas de la simulación con la física Box2D real, sin ventana.
+ * Correr con main(). Necesita los nativos de Box2D: con Gradle ya están en el classpath (Box2D.init());
+ * a mano se puede pasar -Dbox2d.lib=/ruta/libgdx-box2d.so.
+ */
 public class SimSelfTest {
 
     static int fails = 0;
@@ -22,7 +27,7 @@ public class SimSelfTest {
     static MatchSimulation newPlaying(GameMode m) {
         MatchSimulation sim = new MatchSimulation(m);
         PlayerInput a = new PlayerInput(), b = new PlayerInput();
-        for (int i = 0; i < 30 * 4; i++) sim.step(DT, a, b);
+        for (int i = 0; i < 30 * 4; i++) sim.step(DT, a, b); // sale del saque
         return sim;
     }
 
@@ -47,7 +52,7 @@ public class SimSelfTest {
     }
 
     static void cornerNotTrap() {
-
+        // Pelota en la esquina: debe quedar libre de ser sacada (esquina ochavada) y no atascarse.
         MatchSimulation sim = newPlaying(GameMode.TWO_PLAYERS);
         PlayerInput l = new PlayerInput(), r = new PlayerInput();
         float hx = Constants.FIELD_WIDTH / 2f - 0.3f, hy = Constants.FIELD_HEIGHT / 2f - 0.3f;
@@ -120,7 +125,7 @@ public class SimSelfTest {
         l.moveX = 1f; l.sprint = true;
         for (int i = 0; i < 10; i++) sim.step(DT, l, r);
         Vector2 v0 = new Vector2(), v1 = new Vector2();
-        sim.step(DT * 0.25f, l, r);
+        sim.step(DT * 0.25f, l, r); // 1/4 de tick: no hay tick nuevo
         sim.renderPlayerLeft(v0);
         float a0 = sim.getRenderAlpha();
         sim.step(DT * 0.25f, l, r);
@@ -132,7 +137,7 @@ public class SimSelfTest {
     }
 
     static void matchFlow() {
-
+        // Goles, repetición, descanso y tiempo extra sin excepciones.
         Settings.halfMinutes = 1;
         MatchSimulation sim = new MatchSimulation(GameMode.TWO_PLAYERS);
         PlayerInput l = new PlayerInput(), r = new PlayerInput();
@@ -193,6 +198,8 @@ public class SimSelfTest {
         sim.dispose();
     }
 
+    // ------------------------------------------------------------------ 2v2 local cooperativo (MK7)
+
     static void coop2v2Setup() {
         MatchSimulation sim = new MatchSimulation(GameMode.TWO_VS_TWO);
         boolean four = sim.hasMates() && sim.getMateLeft() != null && sim.getMateRight() != null;
@@ -215,7 +222,7 @@ public class SimSelfTest {
         Vector2 p1 = new Vector2(sim.getPlayerLeft().getPosition());
         Vector2 mate = new Vector2(sim.getMateLeft().getPosition());
         sim.getBall().reset(new Vector2(0f, -12f));
-        r.moveY = 1f;
+        r.moveY = 1f; // segundo teclado (flechas)
         for (int i = 0; i < 20; i++) sim.step(DT, l, r);
         float dMate = sim.getMateLeft().getPosition().dst(mate);
         check("2v2: el segundo teclado mueve al compañero (J2)", dMate > 2f, String.format("%.1f m", dMate));
@@ -223,6 +230,7 @@ public class SimSelfTest {
         check("2v2: y el primer jugador (J1) no se mueve con él", dP1 < 0.6f, String.format("%.1f m", dP1));
         sim.dispose();
 
+        // el compañero puede patear
         MatchSimulation s2 = newPlaying(GameMode.TWO_VS_TWO);
         PlayerInput a = new PlayerInput(), b = new PlayerInput();
         s2.getPlayerLeft().body.setTransform(-18f, 12f, 0f);
@@ -311,96 +319,9 @@ public class SimSelfTest {
         MatchSimulation sim = new MatchSimulation(GameMode.TWO_PLAYERS);
         PlayerInput l = new PlayerInput(), r = new PlayerInput();
         long t0 = sim.getTick();
-        sim.step(5f, l, r);
+        sim.step(5f, l, r); // un frame colgado de 5 s
         long ticks = sim.getTick() - t0;
         check("un frame colgado de 5 s simula como máximo ~0,1 s", ticks <= 4, ticks + " ticks");
-        sim.dispose();
-    }
-
-    static void fourPlayersSetup() {
-        MatchSimulation sim = new MatchSimulation(GameMode.FOUR_PLAYERS);
-        check("4J: hay cuatro jugadores de campo", sim.hasMates() && sim.getMateLeft() != null && sim.getMateRight() != null, "");
-        check("4J: por defecto los dos rojos son IA (sin mandos)", !sim.isRightHuman(0) && !sim.isRightHuman(1), "");
-        PlayerInput i3 = new PlayerInput(), i4 = new PlayerInput();
-        sim.setRightHumans(true, i3, false, i4);
-        check("4J: J3 humano, J4 sigue IA", sim.isRightHuman(0) && !sim.isRightHuman(1) && sim.getPlayerRight().humanControlled, "");
-        sim.setRightHumans(true, i3, true, i4);
-        check("4J: J3 y J4 humanos", sim.isRightHuman(0) && sim.isRightHuman(1) && sim.getMateRight().humanControlled, "");
-        sim.dispose();
-        check("4J: GameMode.isTeamMode cubre 2v2 y 4J, no los demás",
-                GameMode.TWO_VS_TWO.isTeamMode() && GameMode.FOUR_PLAYERS.isTeamMode()
-                        && !GameMode.TWO_PLAYERS.isTeamMode() && !GameMode.ONLINE_HOST.isTeamMode(), "");
-    }
-
-    static void fourPlayersControls() {
-        MatchSimulation sim = newPlaying(GameMode.FOUR_PLAYERS);
-        PlayerInput l = new PlayerInput(), r = new PlayerInput(), i3 = new PlayerInput(), i4 = new PlayerInput();
-        sim.setRightHumans(true, i3, true, i4);
-        sim.getBall().reset(new Vector2(0f, 12f));
-        Vector2 p3 = new Vector2(sim.getPlayerRight().getPosition());
-        Vector2 p4 = new Vector2(sim.getMateRight().getPosition());
-        Vector2 p1 = new Vector2(sim.getPlayerLeft().getPosition());
-        Vector2 p2 = new Vector2(sim.getMateLeft().getPosition());
-        i3.moveY = 1f;
-        i4.moveX = -1f;
-        for (int i = 0; i < 20; i++) sim.step(DT, l, r);
-        float d3 = sim.getPlayerRight().getPosition().dst(p3);
-        float d4 = sim.getMateRight().getPosition().dst(p4);
-        check("4J: el input 3 mueve a J3 (rojo)", d3 > 1.5f, String.format("%.1f m", d3));
-        check("4J: el input 4 mueve a J4 (rojo)", d4 > 1.5f, String.format("%.1f m", d4));
-        check("4J: J1 y J2 no se mueven con los inputs rojos",
-                sim.getPlayerLeft().getPosition().dst(p1) < 0.6f && sim.getMateLeft().getPosition().dst(p2) < 0.6f, "");
-        sim.dispose();
-
-        MatchSimulation s2 = newPlaying(GameMode.FOUR_PLAYERS);
-        PlayerInput a = new PlayerInput(), b = new PlayerInput(), c3 = new PlayerInput(), c4 = new PlayerInput();
-        s2.setRightHumans(true, c3, true, c4);
-        s2.getPlayerLeft().body.setTransform(-18f, 12f, 0f);
-        s2.getMateLeft().body.setTransform(-18f, 11f, 0f);
-        s2.getPlayerRight().body.setTransform(18f, 12f, 0f);
-        s2.getMateRight().body.setTransform(3f, 0f, 0f);
-        s2.getMateRight().body.setLinearVelocity(0f, 0f);
-        s2.getBall().reset(new Vector2(2.3f, 0f));
-        for (int i = 0; i < 6; i++) { c4.kickHeld = true; c4.moveX = -1f; s2.step(DT, a, b); }
-        c4.kickHeld = false; c4.kickReleased = true;
-        s2.step(DT, a, b);
-        float v = s2.getBall().body.getLinearVelocity().len();
-        check("4J: J4 puede cargar y patear la pelota", v > 15f, String.format("%.1f m/s", v));
-        s2.dispose();
-    }
-
-    static void fourPlayersMixedAi() {
-
-        MatchSimulation sim = newPlaying(GameMode.FOUR_PLAYERS);
-        PlayerInput l = new PlayerInput(), r = new PlayerInput(), i3 = new PlayerInput(), i4 = new PlayerInput();
-        sim.setRightHumans(true, i3, false, i4);
-        sim.getPlayerLeft().body.setTransform(-20f, 12f, 0f);
-        sim.getMateLeft().body.setTransform(-20f, 10f, 0f);
-        sim.getPlayerRight().body.setTransform(20f, -12f, 0f);
-        sim.getMateRight().body.setTransform(12f, 6f, 0f);
-        sim.getBall().reset(new Vector2(4f, 6f));
-        float d0 = sim.getMateRight().getPosition().dst(sim.getBall().getPosition());
-        for (int i = 0; i < 60; i++) sim.step(DT, l, r);
-        float d1 = sim.getMateRight().getPosition().dst(sim.getBall().getPosition());
-        check("4J: con J3 humano, la IA de J4 persigue la pelota", d1 < d0 - 2f, String.format("%.1f -> %.1f m", d0, d1));
-        sim.dispose();
-    }
-
-    static void fourPlayersFullMatch() {
-
-        MatchSimulation sim = new MatchSimulation(GameMode.FOUR_PLAYERS);
-        PlayerInput l = new PlayerInput(), r = new PlayerInput(), i3 = new PlayerInput(), i4 = new PlayerInput();
-        sim.setRightHumans(true, i3, false, i4);
-        int ticks = 0;
-        try {
-            while (sim.getPhase() != MatchSimulation.Phase.FULL_TIME && ticks < 30 * 60 * 40) {
-                sim.step(DT, l, r);
-                ticks++;
-            }
-            check("4J: el partido completo termina", sim.getPhase() == MatchSimulation.Phase.FULL_TIME, "ticks=" + ticks);
-        } catch (RuntimeException e) {
-            check("4J: el partido completo termina", false, e.toString());
-        }
         sim.dispose();
     }
 
@@ -420,10 +341,6 @@ public class SimSelfTest {
         coop2v2Controls();
         coop2v2AiTeam();
         coop2v2ReplayAndReset();
-        fourPlayersSetup();
-        fourPlayersControls();
-        fourPlayersMixedAi();
-        fourPlayersFullMatch();
         System.out.println(fails == 0 ? "\nTODO OK" : "\nFALLARON " + fails);
         if (fails != 0) System.exit(1);
     }

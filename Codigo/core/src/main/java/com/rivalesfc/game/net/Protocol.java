@@ -4,20 +4,30 @@ import com.rivalesfc.game.input.PlayerInput;
 
 import java.nio.ByteBuffer;
 
+/**
+ * Formato de los mensajes UDP (Etapa 2, paso 1: lo básico).
+ *
+ * Todos los paquetes empiezan con: MAGIC (2 bytes) + VERSION (1) + TIPO (1).
+ * HELLO / WELCOME / BYE no llevan más datos.
+ * INPUT: seq (int) + moveX (float) + moveY (float) + flags (byte)  -> 17 bytes en total.
+ * SNAPSHOT: ver {@link Snapshot} (unos 200 bytes).
+ * PING: marca de tiempo del cliente (int, ms) + último ping que midió (short, ms; -1 = aún no mide).
+ * PONG: la misma marca de tiempo (int), sin tocar.
+ */
 public final class Protocol {
 
-    public static final short MAGIC = 0x5246;
-    public static final byte VERSION = 2;
+    public static final short MAGIC = 0x5246; // "RF"
+    public static final byte VERSION = 4; // MK5: v2 agrega PING/PONG. MK8: v3 agrega faltas/tarjetas al SNAPSHOT; v4 agrega la ventaja (una MK7 o una MK8 anterior no se conectan con esta)
     public static final int DEFAULT_PORT = 7777;
     public static final int MAX_PACKET = 256;
 
-    public static final byte HELLO = 1;
-    public static final byte WELCOME = 2;
-    public static final byte INPUT = 3;
-    public static final byte BYE = 4;
-    public static final byte SNAPSHOT = 5;
-    public static final byte PING = 6;
-    public static final byte PONG = 7;
+    public static final byte HELLO = 1;   // cliente -> host: "quiero entrar"
+    public static final byte WELCOME = 2; // host -> cliente: "entraste"
+    public static final byte INPUT = 3;   // cliente -> host: estado de sus controles
+    public static final byte BYE = 4;     // cualquiera: "me voy"
+    public static final byte SNAPSHOT = 5; // host -> cliente: estado del partido
+    public static final byte PING = 6;    // cliente -> host: marca de tiempo + último ping medido (MK5)
+    public static final byte PONG = 7;    // host -> cliente: devuelve la misma marca de tiempo (MK5)
 
     private static final int F_SPRINT = 1;
     private static final int F_KICK_HELD = 2;
@@ -28,6 +38,7 @@ public final class Protocol {
     private Protocol() {
     }
 
+    /** Deja el buffer listo para escribir el cuerpo del mensaje. */
     public static void writeHeader(ByteBuffer b, byte type) {
         b.clear();
         b.putShort(MAGIC);
@@ -35,6 +46,7 @@ public final class Protocol {
         b.put(type);
     }
 
+    /** Devuelve el tipo de mensaje, o -1 si el paquete no es de este juego / versión. */
     public static int readType(ByteBuffer b) {
         if (b.remaining() < 4) return -1;
         if (b.getShort() != MAGIC) return -1;
@@ -55,6 +67,7 @@ public final class Protocol {
         b.put((byte) flags);
     }
 
+    /** Lee un INPUT. Devuelve false si el paquete está incompleto. */
     public static boolean readInput(ByteBuffer b, PlayerInput out) {
         if (b.remaining() < 13) return false;
         out.sequence = b.getInt();
@@ -69,8 +82,15 @@ public final class Protocol {
         return true;
     }
 
+    // ------------------------------------------------------------------
+    // MK6: identidad del jugador (equipo elegido + nombre). Cuerpo OPCIONAL de HELLO/WELCOME:
+    // si falta (cliente/host sin identidad) se ignora, así que la versión del protocolo no cambia.
+    // Formato: team (byte) + largo del nombre (byte) + nombre en UTF-8.
+    // ------------------------------------------------------------------
+
     public static final int MAX_NAME_LEN = 12;
 
+    /** Deja el nombre en mayúsculas, solo letras/números/espacio/guion y de hasta {@link #MAX_NAME_LEN} caracteres. */
     public static String cleanName(String raw) {
         if (raw == null) return "";
         StringBuilder sb = new StringBuilder();
@@ -91,6 +111,7 @@ public final class Protocol {
         b.put(n, 0, len);
     }
 
+    /** Lee la identidad si el paquete la trae; devuelve null si no hay (o está incompleta). */
     public static Identity readIdentity(ByteBuffer b) {
         if (b.remaining() < 2) return null;
         int team = b.get();
@@ -101,6 +122,7 @@ public final class Protocol {
         return new Identity(team, cleanName(new String(n, java.nio.charset.StandardCharsets.UTF_8)));
     }
 
+    /** Equipo (índice en la lista de equipos del juego) y nombre de un jugador. */
     public static final class Identity {
         public final int team;
         public final String name;
@@ -111,14 +133,20 @@ public final class Protocol {
         }
     }
 
+    /** Cuerpo de PING: marca de tiempo local (ms, puede dar la vuelta al int) + último ping medido. */
     public static void writePing(ByteBuffer b, int stampMs, int lastPingMs) {
         b.putInt(stampMs);
         b.putShort((short) Math.max(-1, Math.min(Short.MAX_VALUE, lastPingMs)));
     }
 
+    /** Lee la marca de tiempo de un PING/PONG; devuelve false si está incompleto. */
     public static boolean hasStamp(ByteBuffer b) {
         return b.remaining() >= 4;
     }
+
+    // ------------------------------------------------------------------
+    // SNAPSHOT (host -> cliente)
+    // ------------------------------------------------------------------
 
     public static void writeSnapshot(ByteBuffer b, Snapshot s) {
         b.putInt(s.tick);
@@ -146,8 +174,17 @@ public final class Protocol {
         for (int i = 0; i < 2; i++) {
             b.put(s.shots[i]).put(s.shotsOnTarget[i]).put(s.tackles[i]).put(s.saves[i]);
         }
+        // MK8: faltas
+        b.putInt(s.foulCount).put(s.foulerIdx).put(s.foulCard).put(s.foulType);
+        b.put((byte) (s.foulPenalty ? 1 : 0)).putFloat(s.foulX).putFloat(s.foulY);
+        b.put(s.advantageTeam).putInt(s.advantageCount);
+        for (int i = 0; i < 2; i++) {
+            b.put(s.fouls[i]).put(s.yellows[i]).put(s.reds[i]);
+            b.put((byte) (s.suspended[i] ? 1 : 0)).putFloat(s.suspendRemaining[i]);
+        }
     }
 
+    /** Lee un SNAPSHOT. Devuelve false si el paquete está incompleto. */
     public static boolean readSnapshot(ByteBuffer b, Snapshot s) {
         if (b.remaining() < SNAPSHOT_BYTES) return false;
         s.tick = b.getInt();
@@ -176,11 +213,21 @@ public final class Protocol {
         for (int i = 0; i < 2; i++) {
             s.shots[i] = b.get(); s.shotsOnTarget[i] = b.get(); s.tackles[i] = b.get(); s.saves[i] = b.get();
         }
+        s.foulCount = b.getInt(); s.foulerIdx = b.get(); s.foulCard = b.get(); s.foulType = b.get();
+        s.foulPenalty = b.get() != 0; s.foulX = b.getFloat(); s.foulY = b.getFloat();
+        s.advantageTeam = b.get(); s.advantageCount = b.getInt();
+        for (int i = 0; i < 2; i++) {
+            s.fouls[i] = b.get(); s.yellows[i] = b.get(); s.reds[i] = b.get();
+            s.suspended[i] = b.get() != 0; s.suspendRemaining[i] = b.getFloat();
+        }
         return true;
     }
 
-    private static final int SNAPSHOT_BYTES = 4 + 6 + 12 + 20 + 2 * 21 + 2 * 13 + 16 + 8;
+    /** Tamaño del cuerpo de un SNAPSHOT (sin cabecera). */
+    private static final int SNAPSHOT_BYTES = 4 + 6 + 12 + 20 + 2 * 21 + 2 * 13 + 16 + 8
+            + (4 + 1 + 1 + 1 + 1 + 8) + 2 * (3 + 1 + 4) + (1 + 4); // MK8: faltas + ventaja
 
+    /** El host no confía en el cliente: NaN o valores fuera de rango no pasan. */
     private static float clampAxis(float v) {
         if (Float.isNaN(v)) return 0f;
         return Math.max(-1f, Math.min(1f, v));

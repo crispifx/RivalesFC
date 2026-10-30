@@ -7,6 +7,12 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
 
+/**
+ * Lado cliente (Etapa 2, paso 1): se conecta a un host y le manda su input.
+ *
+ * Sin hilos: llamar a {@link #poll()} una vez por frame.
+ * Todavía no recibe el estado del partido (paso siguiente).
+ */
 public class NetClient {
 
     public enum State { IDLE, CONNECTING, CONNECTED, FAILED, DISCONNECTED }
@@ -27,26 +33,29 @@ public class NetClient {
     private boolean hasAny;
     private boolean hasNew;
     private long lastPingNanos;
-    private int pingMs = -1;
+    private int pingMs = -1; // MK5: ida y vuelta al host, suavizado; -1 = todavía sin medir
     private final ByteBuffer buf = ByteBuffer.allocate(Protocol.MAX_PACKET);
-
+    // MK6: identidad propia (se manda en el HELLO) y la del host (llega en el WELCOME).
     private int localTeam = 0;
     private String localName = "";
     private Protocol.Identity hostIdentity;
 
+    /** Equipo y nombre que se le mandan al host; llamar antes de {@link #connect}. */
     public void setLocalIdentity(int team, String name) {
         localTeam = team;
         localName = name;
     }
 
+    /** Identidad del host, o null si todavía no llegó (o es un host sin identidad). */
     public Protocol.Identity getHostIdentity() {
         return hostIdentity;
     }
 
+    /** Empieza a conectar; el resultado se ve en {@link #getState()} tras llamar a poll(). */
     public void connect(String host, int port) throws IOException {
         channel = DatagramChannel.open();
         channel.configureBlocking(false);
-        channel.connect(new InetSocketAddress(host, port));
+        channel.connect(new InetSocketAddress(host, port)); // filtra paquetes de otras direcciones
         state = State.CONNECTING;
         connectStartNanos = System.nanoTime();
         lastHelloNanos = 0;
@@ -58,6 +67,7 @@ public class NetClient {
         hostIdentity = null;
     }
 
+    /** MK5: ping (ida y vuelta) en milisegundos, o -1 si todavía no se midió. */
     public int getPingMs() {
         return pingMs;
     }
@@ -82,12 +92,12 @@ public class NetClient {
             }
             if (lastHelloNanos == 0 || now - lastHelloNanos > HELLO_INTERVAL_NANOS) {
                 lastHelloNanos = now;
-                sendHello();
+                sendHello(); // se reintenta hasta recibir WELCOME
             }
         }
 
         if (state == State.CONNECTED && lastRecvNanos != 0 && now - lastRecvNanos > HOST_TIMEOUT_NANOS) {
-            state = State.DISCONNECTED;
+            state = State.DISCONNECTED; // el host dejó de mandar datos
             closeChannel();
             return;
         }
@@ -112,15 +122,15 @@ public class NetClient {
                     state = State.CONNECTED;
                     lastRecvNanos = now;
                 } else if (type == Protocol.SNAPSHOT) {
-                    state = State.CONNECTED;
+                    state = State.CONNECTED; // si el WELCOME se perdió, un snapshot también prueba la conexión
                     if (Protocol.readSnapshot(buf, incoming)
-                            && (!hasAny || incoming.tick - latest.tick > 0)) {
+                            && (!hasAny || incoming.tick - latest.tick > 0)) { // descarta paquetes viejos
                         latest.copyFrom(incoming);
                         hasAny = true;
                         hasNew = true;
                     }
                 } else if (type == Protocol.PONG && Protocol.hasStamp(buf)) {
-                    int rtt = (int) (now / 1_000_000L) - buf.getInt();
+                    int rtt = (int) (now / 1_000_000L) - buf.getInt(); // la resta en int tolera la vuelta del reloj
                     if (rtt >= 0 && rtt < 10_000) {
                         pingMs = pingMs < 0 ? rtt : Math.round(pingMs * 0.7f + rtt * 0.3f);
                     }
@@ -131,10 +141,11 @@ public class NetClient {
                 }
             }
         } catch (IOException e) {
-
+            // Host todavía no está escuchando (ICMP "puerto inalcanzable"): se sigue reintentando.
         }
     }
 
+    /** Si llegó un snapshot nuevo desde la última vez, lo copia a {@code out} y devuelve true. */
     public boolean takeSnapshot(Snapshot out) {
         if (!hasNew) return false;
         out.copyFrom(latest);
@@ -142,6 +153,7 @@ public class NetClient {
         return true;
     }
 
+    /** Envía el estado actual de los controles. Solo tiene efecto si ya se está conectado. */
     public void sendInput(PlayerInput in) {
         if (state != State.CONNECTED) return;
         in.sequence = nextSeq++;

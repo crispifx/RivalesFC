@@ -18,11 +18,21 @@ import java.util.Random;
 import com.rivalesfc.game.gfx.SoftCanvas.Paint;
 import com.rivalesfc.game.gfx.SoftCanvas.Shape;
 
+/**
+ * Arte procedural en alta resolución y con antialiasing (Java puro, sin LibGDX).
+ * {@link PixelArtFactory} convierte estos mapas de bits en texturas.
+ *
+ * Reemplaza los sprites de 20x32 px con bordes duros de la MK6: ahora los
+ * jugadores se dibujan a 120x192, la pelota a 160x160, el pasto y las líneas de
+ * la cancha a 32 px por metro (las líneas se calculan con distancia analítica,
+ * por eso salen nítidas sin escalones) y la tribuna en su proporción real.
+ */
 public final class ArtPainter {
 
     private ArtPainter() {
     }
 
+    /** Imagen ARGB (sin premultiplicar), fila 0 = arriba. */
     public static final class Bitmap {
         public final int w;
         public final int h;
@@ -41,6 +51,11 @@ public final class ArtPainter {
 
     private static final int OUTLINE = 0xFF15110F;
 
+    // ------------------------------------------------------------------
+    // Jugador / arquero
+    // ------------------------------------------------------------------
+
+    /** Jugador de frente, 120x192. Los colores vienen como ARGB. */
     public static Bitmap person(final int jersey, final int shorts, boolean keeper) {
         SoftCanvas c = new SoftCanvas(PERSON_W, PERSON_H, 3);
         final float ow = 2.4f;
@@ -52,6 +67,7 @@ public final class ArtPainter {
         final int sock = keeper ? shade(shorts, 0.85f) : rgb(0.96f, 0.96f, 0.96f);
         final int glove = rgb(0.98f, 0.82f, 0.14f);
 
+        // --- Botines
         for (int side = 0; side < 2; side++) {
             float cx = side == 0 ? 43f : 77f;
             Shape b = ellipse(cx, 180f, 17f, 9f);
@@ -59,6 +75,7 @@ public final class ArtPainter {
             c.fill(ellipse(cx + (side == 0 ? -3f : 3f), 177f, 7f, 2.2f), 0x55FFFFFF);
         }
 
+        // --- Medias, con franja del color de la camiseta
         for (int side = 0; side < 2; side++) {
             float cx = side == 0 ? 43f : 77f;
             Shape s = roundRect(cx, 156f, 9.5f, 24f, 5f);
@@ -66,12 +83,14 @@ public final class ArtPainter {
             c.fill(intersect(s, roundRect(cx, 145f, 12f, 3f, 1f)), shade(jersey, 0.95f));
         }
 
+        // --- Muslos (piel) debajo del short
         for (int side = 0; side < 2; side++) {
             float cx = side == 0 ? 43f : 77f;
             c.fillOutlined(roundRect(cx, 135f, 9.5f, 12f, 4f),
                     hgrad(cx - 9.5f, skin, cx + 9.5f, skinD), ow, OUTLINE);
         }
 
+        // --- Short: dos piernas + cintura
         for (int side = 0; side < 2; side++) {
             float cx = side == 0 ? 42f : 78f;
             Shape s = roundRect(cx, 119f, 18f, 19f, 8f);
@@ -86,8 +105,10 @@ public final class ArtPainter {
         }
         c.fillOutlined(roundRect(60f, 102f, 33f, 5.5f, 3f), shade(shorts, 0.78f), ow, OUTLINE);
 
+        // --- Cuello
         c.fillOutlined(roundRect(60f, 54f, 8f, 7f, 3f), skinD, ow, OUTLINE);
 
+        // --- Torso (camiseta)
         Shape torso = roundRect(60f, 83f, 33f, 30f, 15f);
         c.fillOutlined(torso, new Paint() {
             @Override
@@ -97,23 +118,24 @@ public final class ArtPainter {
                 return shade(jersey, 1.14f - 0.36f * t - 0.10f * v);
             }
         }, ow, OUTLINE);
-
+        // franja vertical central, más clara
         c.fill(intersect(torso, roundRect(60f, 83f, 9f, 40f, 0f)), SoftCanvas.withAlpha(0xFFFFFFFF, 0.13f));
-
+        // dobladillo
         c.fill(intersect(torso, roundRect(60f, 112f, 40f, 3f, 0f)), SoftCanvas.withAlpha(0xFF000000, 0.18f));
-
+        // cuello en V
         c.fillOutlined(polygon(47f, 55f, 73f, 55f, 60f, 73f), rgb(0.97f, 0.97f, 0.97f), 1.6f, OUTLINE);
         c.fill(polygon(52f, 56f, 68f, 56f, 60f, 67f), skinD);
-
+        // escudo
         c.fillOutlined(circle(76f, 78f, 5.2f), rgb(0.97f, 0.97f, 0.97f), 1.4f, OUTLINE);
         c.fill(circle(76f, 78f, 2.6f), shade(jersey, 0.85f));
 
+        // --- Brazos
         for (int side = 0; side < 2; side++) {
             float m = side == 0 ? 1f : -1f;
             float sx = 60f - m * 33f;
             float elbowX = 60f - m * 40f;
             float handX = 60f - m * 42f;
-
+            // manga
             c.fillOutlined(capsule(sx, 66f, elbowX, 88f, 10f, 8.5f),
                     new Paint() {
                         @Override
@@ -121,11 +143,11 @@ public final class ArtPainter {
                             return shade(jersey, 1.0f - 0.2f * Math.abs(x - 60f) / 45f);
                         }
                     }, ow, OUTLINE);
-
+            // puño de la manga
             c.fill(capsule(elbowX + m * 0.3f, 87f, elbowX + m * 0.3f, 89f, 8.6f, 8.6f), shade(shorts, 0.95f));
-
+            // antebrazo
             c.fillOutlined(capsule(elbowX, 92f, handX, 108f, 6.2f, 5.6f), skin, ow, OUTLINE);
-
+            // mano / guante
             if (keeper) {
                 c.fillOutlined(circle(handX, 114f, 9.5f), vgrad(104f, shade(glove, 1.1f), 124f, shade(glove, 0.8f)),
                         ow, OUTLINE);
@@ -134,15 +156,19 @@ public final class ArtPainter {
             }
         }
 
+        // --- Orejas
         c.fillOutlined(circle(37f, 34f, 5.2f), skinD, 1.8f, OUTLINE);
         c.fillOutlined(circle(83f, 34f, 5.2f), skinD, 1.8f, OUTLINE);
 
+        // --- Cabeza
         Shape head = ellipse(60f, 32f, 23.5f, 26f);
         c.fillOutlined(head, radial(52f, 22f, 44f, shade(skin, 1.08f), shade(skin, 0.80f)), ow, OUTLINE);
 
+        // --- Pelo
         Shape hairShape = minus(ellipse(60f, 24f, 26f, 21.5f), ellipse(60f, 42f, 19.5f, 21.5f));
         c.fillOutlined(hairShape, vgrad(6f, shade(hair, 1.5f), 30f, hair), 1.8f, OUTLINE);
 
+        // --- Cara
         for (int side = 0; side < 2; side++) {
             float ex = side == 0 ? 51f : 69f;
             c.fill(ellipse(ex, 36f, 3.6f, 4.6f), rgb(0.97f, 0.97f, 0.97f));
@@ -158,6 +184,10 @@ public final class ArtPainter {
         return new Bitmap(PERSON_W, PERSON_H, c.toArgb(OUTLINE));
     }
 
+    // ------------------------------------------------------------------
+    // Pelota
+    // ------------------------------------------------------------------
+
     public static Bitmap ball() {
         final int S = BALL_SIZE;
         SoftCanvas c = new SoftCanvas(S, S, 3);
@@ -170,6 +200,7 @@ public final class ArtPainter {
         c.outline(disc, 2.6f, OUTLINE);
         c.fill(disc, radial(cx - 18f, cy - 22f, 105f, rgb(1f, 1f, 1f), rgb(0.66f, 0.68f, 0.72f)));
 
+        // costuras radiales
         for (int k = 0; k < 5; k++) {
             double a = Math.toRadians(-90 + 72 * k);
             float ca = (float) Math.cos(a);
@@ -177,7 +208,7 @@ public final class ArtPainter {
             c.fill(intersect(disc, capsule(cx + ca * 18f, cy + sa * 18f, cx + ca * 46f, cy + sa * 46f, 1.5f, 1.5f)),
                     rgb(0.30f, 0.31f, 0.35f));
         }
-
+        // pentágonos
         c.fill(polygon(regularPoly(cx, cy, 22f, -90f, 5)), dark);
         for (int k = 0; k < 5; k++) {
             double a = Math.toRadians(-90 + 72 * k);
@@ -186,7 +217,7 @@ public final class ArtPainter {
             Shape p = polygon(regularPoly(px, py, 21f, -90f + 72 * k + 180f, 5));
             c.fill(intersect(disc, p), dark);
         }
-
+        // sombreado de volumen en el borde
         c.fill(disc, new Paint() {
             @Override
             public int argb(float x, float y) {
@@ -197,7 +228,7 @@ public final class ArtPainter {
                 return SoftCanvas.argb(0.02f, 0.03f, 0.08f, a);
             }
         });
-
+        // brillo
         c.fill(ellipse(cx - 22f, cy - 28f, 15f, 9f), radial(cx - 22f, cy - 28f, 16f, 0x99FFFFFF, 0x00FFFFFF));
 
         return new Bitmap(S, S, c.toArgb(OUTLINE));
@@ -213,6 +244,12 @@ public final class ArtPainter {
         return pts;
     }
 
+    // ------------------------------------------------------------------
+    // Sombra y anillo del jugador propio
+    // ------------------------------------------------------------------
+
+    /** Sombra elíptica suave, 128x64. */
+    /** MK7: halo suave (blanco-amarillento) que se dibuja detrás de la pelota para que resalte sobre el pasto y las líneas. */
     public static Bitmap halo() {
         final int w = 128;
         final int h = 128;
@@ -253,6 +290,7 @@ public final class ArtPainter {
         return new Bitmap(w, h, c.toArgb(0xFF000000));
     }
 
+    /** Anillo blanco (elipse) para marcar al jugador propio, 160x80. */
     public static Bitmap ring() {
         final int w = 160;
         final int h = 80;
@@ -264,6 +302,11 @@ public final class ArtPainter {
         return new Bitmap(w, h, c.toArgb(0xFFFFFFFF));
     }
 
+    // ------------------------------------------------------------------
+    // Tribuna
+    // ------------------------------------------------------------------
+
+    /** Tribuna con público sentado en filas. {@code w x h} en píxeles (usar la proporción real de la franja). */
     public static Bitmap crowd(int w, int h) {
         SoftCanvas c = new SoftCanvas(w, h, 2);
         Random rnd = new Random(20261006L);
@@ -320,11 +363,20 @@ public final class ArtPainter {
                 x += step + (rnd.nextFloat() - 0.5f) * 3f;
             }
         }
-
+        // suave oscurecimiento hacia el fondo de la tribuna
         c.fill(roundRect(w / 2f, h / 2f, w / 2f, h / 2f, 0f), vgrad(0f, 0x66000010, h * 0.7f, 0x00000010));
         return new Bitmap(w, h, c.toArgb(0xFF0A0B10));
     }
 
+    // ------------------------------------------------------------------
+    // Cancha completa: pasto, líneas, arcos con red y carteles
+    // ------------------------------------------------------------------
+
+    /**
+     * Textura de toda la zona visible (cancha + margen), a {@code ppm} píxeles por metro.
+     * Cubre x en [-(fieldW/2+margin), +(fieldW/2+margin)] e y en [-(fieldH/2+margin), +(fieldH/2+margin)].
+     * Las líneas se calculan por distancia analítica (bordes suaves a cualquier zoom).
+     */
     public static Bitmap ground(float fieldW, float fieldH, float margin, float goalW, float goalDepth,
                                 float penDepth, float penH, float gbDepth, float gbH, float ppm) {
         final float halfW = fieldW / 2f;
@@ -338,11 +390,12 @@ public final class ArtPainter {
         float[] mask = new float[W * H];
         Mask m = new Mask(mask, W, H, halfX, halfY, ppm);
 
+        // contorno, línea central y círculo
         m.rect(-halfW, -halfH, halfW, halfH, lineHW);
         m.seg(0f, -halfH, 0f, halfH, lineHW);
         m.arc(0f, 0f, 3f, 0f, 360f, lineHW);
         m.dot(0f, 0f, 0.20f);
-
+        // áreas (los lados sobre la línea de fondo ya están en el contorno)
         for (int side = -1; side <= 1; side += 2) {
             float gx = side * halfW;
             float px = side * (halfW - penDepth);
@@ -353,7 +406,7 @@ public final class ArtPainter {
             m.seg(bx, -gbH / 2f, bx, gbH / 2f, lineHW);
             m.seg(gx, gbH / 2f, bx, gbH / 2f, lineHW);
             m.seg(gx, -gbH / 2f, bx, -gbH / 2f, lineHW);
-
+            // punto de penal y "medialuna"
             float spotX = side * (halfW - (penDepth - 0.9f));
             m.dot(spotX, 0f, 0.16f);
             float ang = (float) Math.toDegrees(Math.acos(0.9f / 3f));
@@ -362,7 +415,7 @@ public final class ArtPainter {
             } else {
                 m.arc(spotX, 0f, 3f, 180f - ang, 180f + ang, lineHW);
             }
-
+            // marco del arco
             float bk = side * (halfW + goalDepth);
             m.seg(gx, -goalW / 2f, bk, -goalW / 2f, 0.06f);
             m.seg(bk, -goalW / 2f, bk, goalW / 2f, 0.06f);
@@ -370,13 +423,13 @@ public final class ArtPainter {
             m.dot(gx, -goalW / 2f, 0.13f);
             m.dot(gx, goalW / 2f, 0.13f);
         }
-
+        // arcos de córner (hacia adentro de la cancha)
         m.arc(-halfW, halfH, 1f, 270f, 360f, lineHW);
         m.arc(halfW, halfH, 1f, 180f, 270f, lineHW);
         m.arc(-halfW, -halfH, 1f, 0f, 90f, lineHW);
         m.arc(halfW, -halfH, 1f, 90f, 180f, lineHW);
 
-        final float stripeW = fieldW / 10f;
+        final float stripeW = fieldW / 10f; // 10 franjas: el cambio de color cae justo en la línea central
         final float[] light = {0.22f, 0.63f, 0.27f};
         final float[] dark = {0.14f, 0.49f, 0.20f};
         final float boardY0 = halfH + 0.25f;
@@ -390,6 +443,7 @@ public final class ArtPainter {
                 float wx = -halfX + (i + 0.5f) / ppm;
                 float ax = Math.abs(wx);
 
+                // --- rayas de corte
                 float u = (wx + halfW) / stripeW;
                 float fl = (float) Math.floor(u);
                 float f = u - fl;
@@ -401,6 +455,7 @@ public final class ArtPainter {
                 float g = dark[1] + (light[1] - dark[1]) * tone;
                 float b = dark[2] + (light[2] - dark[2]) * tone;
 
+                // --- textura del pasto: manchas grandes, medias, hebras y grano fino
                 float n1 = vnoise(wx * 0.30f, wy * 0.30f, 11);
                 float n2 = vnoise(wx * 2.2f, wy * 2.2f, 23);
                 float st = vnoise(wx * 20f, wy * 1.4f, 37);
@@ -427,7 +482,7 @@ public final class ArtPainter {
                     r = 0.05f + 0.04f * mul;
                     g = 0.13f + 0.05f * mul;
                     b = 0.08f + 0.03f * mul;
-
+                    // red: malla de 0,3 m
                     float gx = netDist(wx - halfW * Math.signum(wx), 0.3f);
                     float gy = netDist(wy + goalW / 2f, 0.3f);
                     float dnet = Math.min(gx, gy);
@@ -436,7 +491,7 @@ public final class ArtPainter {
                     g += (1f - g) * cov;
                     b += (1f - b) * cov;
                 } else if (ay >= boardY0 && ay <= halfY && ax <= halfX) {
-
+                    // --- carteles publicitarios (negro con ribete dorado) y fondo oscuro detrás
                     if (ay <= boardY1) {
                         float t = (ay - boardY0) / (boardY1 - boardY0);
                         float lit = 0.06f + 0.05f * (1f - t);
@@ -455,7 +510,7 @@ public final class ArtPainter {
                                 g += 0.10f;
                                 b += 0.11f;
                             }
-
+                            // detalle: rombo dorado en el centro de cada cartel
                             float cx = Math.abs(pf - 0.5f) * 4f;
                             float cyy = Math.abs(t - 0.5f) * (boardY1 - boardY0);
                             if (cx + cyy * 2.2f < 0.14f) {
@@ -471,6 +526,7 @@ public final class ArtPainter {
                     }
                 }
 
+                // --- líneas blancas
                 float lc = mask[j * W + i];
                 if (lc > 0f) {
                     float a = lc * 0.94f;
@@ -491,6 +547,7 @@ public final class ArtPainter {
         return 0xFF000000 | (ri << 16) | (gi << 8) | bi;
     }
 
+    /** Distancia (m) a la línea de malla más cercana en una dimensión. */
     private static float netDist(float v, float spacing) {
         float t = v / spacing;
         float f = t - (float) Math.floor(t);
@@ -520,6 +577,7 @@ public final class ArtPainter {
         return top + (bot - top) * fy;
     }
 
+    /** Máscara de líneas con cobertura analítica (en metros del mundo → píxeles de la textura). */
     private static final class Mask {
         final float[] mask;
         final int w;
@@ -603,6 +661,7 @@ public final class ArtPainter {
             }
         }
 
+        /** Arco de circunferencia de radio r desde a0 hasta a1 (grados, antihorario). */
         void arc(float cx, float cy, float r, float a0, float a1, float hw) {
             int i0 = Math.max(0, px(cx - r - hw) - 1);
             int i1 = Math.min(w - 1, px(cx + r + hw) + 1);

@@ -9,11 +9,32 @@ import com.rivalesfc.game.entities.GoalkeeperEntity;
 import com.rivalesfc.game.entities.PlayerEntity;
 import com.rivalesfc.game.input.PlayerInput;
 
+/**
+ * IA de soporte (modo 1 jugador). Llena un {@link PlayerInput} igual que lo haría
+ * un teclado, así que movimiento, pateo y planchazo siguen teniendo una única
+ * implementación.
+ *
+ * MK4: pasa de "correr a la pelota y patear" a una máquina de estados chica:
+ *   DEFEND — si el rival tiene la pelota en la mitad propia, se planta del lado del
+ *            arco propio (entre la pelota y el arco) y, si se le acerca, intenta barrida.
+ *   CHASE  — va a buscar la pelota, aproximándose desde atrás respecto de la dirección
+ *            en la que quiere patear (así el pateo sale hacia donde apunta).
+ *   CARRY  — con la pelota al alcance decide entre:
+ *              SHOOT: remate al rincón más alejado del arquero rival (con error según dificultad),
+ *              PASS : toque suave hacia un espacio libre (esquivando al rival si lo tiene encima).
+ *
+ * Aclaración honesta: en el 2v2 fijo cada equipo tiene un solo jugador de campo, así que el
+ * "pase" de la IA es un toque a espacio libre y no un pase a un compañero. Los pases a
+ * compañeros llegan con más jugadores por equipo (Etapa 3).
+ *
+ * La dirección del pateo en este juego es "desde el jugador hacia la pelota", por eso la IA
+ * se acomoda detrás de la pelota, sobre la línea hacia su objetivo, antes de cargar el pateo.
+ */
 public class SupportAI {
 
     private enum Action { NONE, SHOOT, PASS }
 
-    private final float attackSign;
+    private final float attackSign;   // +1 ataca hacia X+, -1 hacia X-
     private final float goalX;
     private final float ownGoalX;
 
@@ -24,6 +45,10 @@ public class SupportAI {
     private float slideRetryCooldown = 0f;
     private float stuckTimer = 0f;
 
+    /**
+     * @param attackingTowardsNegativeX true si este jugador ataca hacia el arco de X negativo
+     *                                  (equipo ROJO, panel derecho).
+     */
     public SupportAI(boolean attackingTowardsNegativeX) {
         this.attackSign = attackingTowardsNegativeX ? -1f : 1f;
         float edge = Constants.FIELD_WIDTH / 2f + Constants.GOAL_DEPTH * 0.4f;
@@ -31,11 +56,18 @@ public class SupportAI {
         this.ownGoalX = -attackSign * edge;
     }
 
+    /** Se llama una vez por tick (30 Hz). */
     public void update(PlayerInput out, PlayerEntity self, Ball ball, PlayerEntity rival,
                        GoalkeeperEntity oppKeeper, float dt) {
         update(out, self, ball, rival, oppKeeper, dt, false, null);
     }
 
+    /**
+     * MK7 (2v2): igual que {@link #update(PlayerInput, PlayerEntity, Ball, PlayerEntity, GoalkeeperEntity, float)} pero
+     * con rol. Si {@code support} es true y la pelota no está a su alcance, en vez de ir a buscarla se coloca para
+     * apoyar (adelante y del lado opuesto si el equipo ataca) o para cubrir (entre la pelota y el propio arco si
+     * defiende). {@code mate} es la posición del compañero que presiona, para no amontonarse con él.
+     */
     public void update(PlayerInput out, PlayerEntity self, Ball ball, PlayerEntity rival,
                        GoalkeeperEntity oppKeeper, float dt, boolean support, Vector2 mate) {
         Settings.Difficulty diff = Settings.difficulty;
@@ -68,26 +100,34 @@ public class SupportAI {
                 if (rivalHasBall && ballInOwnHalf && sp.dst(rp) > 2.4f) {
                     defend(out, sp, bp, diff);
                 } else {
-                    chase(out, sp, bp, distBall, diff);
+                    chase(out, sp, bp, distBall, diff, rivalHasBall ? rp : null);
                 }
                 trySlide(out, self, ball, rival, distBall, dt);
             }
         }
 
+        // MK8: con faltas activas, cerca de un rival y sin la pelota al alcance, no esprinta: a más de 8,5 m/s un choque
+        // es falta de carga. Lo hace un defensor cuidadoso (y evita decenas de faltas por partido de la IA).
+        if (Settings.foulsEnabled && out.sprint && !self.isNear(ball) && sp.dst(rp) < Constants.AI_FOUL_CAUTION_DIST) {
+            out.sprint = false;
+        }
+
+        // Anti-atasco: si está pegada a un borde sin avanzar, no se queda "empujando" la pared.
         out.moveX *= diff.aiMoveScale;
         out.moveY *= diff.aiMoveScale;
         out.normalizeMove();
     }
 
+    // --------------------------------------------------------------- SUPPORT (2v2)
     private void supportMove(PlayerInput out, Vector2 sp, Vector2 bp, Vector2 mate, boolean ballInOwnHalf,
                              Settings.Difficulty diff) {
         Vector2 spot = new Vector2();
         if (ballInOwnHalf) {
-
+            // Cubre: entre la pelota y el propio arco, más cerca del arco.
             spot.set(ownGoalX, 0f).lerp(bp, 0.45f);
             spot.y = bp.y * 0.5f;
         } else {
-
+            // Apoya: adelante de la pelota y del lado contrario, como opción de pase.
             spot.set(bp.x + attackSign * 5f, bp.y > 0f ? bp.y - 7f : bp.y + 7f);
         }
         if (mate != null && spot.dst(mate) < 3f) {
@@ -108,6 +148,7 @@ public class SupportAI {
         out.sprint = len > diff.aiSprintDist;
     }
 
+    // ---------------------------------------------------------------- DEFEND
     private void defend(PlayerInput out, Vector2 sp, Vector2 bp, Settings.Difficulty diff) {
         Vector2 toOwnGoal = new Vector2(ownGoalX, 0f).sub(bp).nor();
         Vector2 post = new Vector2(bp).mulAdd(toOwnGoal, 2.4f);
@@ -121,14 +162,22 @@ public class SupportAI {
         out.sprint = len > diff.aiSprintDist;
     }
 
-    private void chase(PlayerInput out, Vector2 sp, Vector2 bp, float distBall, Settings.Difficulty diff) {
-
+    // ----------------------------------------------------------------- CHASE
+    private void chase(PlayerInput out, Vector2 sp, Vector2 bp, float distBall, Settings.Difficulty diff, Vector2 rivalWithBall) {
+        // Cerca de la pelota se acerca desde atrás, sobre la línea hacia el arco rival.
         Vector2 approach = new Vector2(bp);
-        if (distBall < 4f) {
+        if (rivalWithBall != null && Settings.foulsEnabled && distBall < 5f) {
+            // MK8: el rival protege la pelota con el cuerpo; ir derecho a ella es chocarlo (falta). Se rodea hasta quedar del
+            // otro lado de la pelota, así el planchazo (o el toque) llega a la pelota antes que al rival.
+            Vector2 away = new Vector2(bp).sub(rivalWithBall);
+            if (away.len2() > 0.0004f) {
+                approach.mulAdd(away.nor(), Constants.AI_FLANK_DIST);
+            }
+        } else if (distBall < 4f) {
             Vector2 toGoal = new Vector2(goalX, 0f).sub(bp).nor();
             approach.mulAdd(toGoal, -0.55f);
         }
-        clampInside(approach);
+        clampInside(approach); // MK7: no apuntar a un punto fuera de la cancha (empujaba el muro)
         Vector2 go = new Vector2(approach).sub(sp);
         if (go.len2() > 0.0004f) {
             go.nor();
@@ -138,6 +187,7 @@ public class SupportAI {
         out.sprint = distBall > diff.aiSprintDist;
     }
 
+    // -------------------------------------------------------- CARRY (SHOOT/PASS)
     private void carry(PlayerInput out, PlayerEntity self, Ball ball, PlayerEntity rival,
                        GoalkeeperEntity oppKeeper, float dt, Settings.Difficulty diff) {
         Vector2 sp = self.getPosition();
@@ -163,15 +213,17 @@ public class SupportAI {
         kickDir.nor();
         float alignment = kickDir.dot(dirT);
 
+        // MK7 (fix): antes exigía alineación > 0,94. Con la pelota pegada a un muro eso nunca se cumplía y la IA se
+        // quedaba empujando 40+ s. Ahora alcanza con > 0,80 porque al soltar se apunta con el movimiento (AIM_ASSIST).
         if (alignment > 0.80f && dist < Constants.KICK_RANGE) {
-
+            // Bien parada detrás de la pelota: carga el remate/toque y lo suelta.
             kickChargeTimer += dt;
             if (kickChargeTimer >= targetCharge * Constants.KICK_CHARGE_TIME) {
                 out.kickHeld = false;
                 out.kickReleased = true;
                 kickChargeTimer = 0f;
                 pending = Action.NONE;
-
+                // MK7: al soltar, se mueve hacia el objetivo con todo: la dirección del pateo se corrige hacia él.
                 out.moveX = dirT.x;
                 out.moveY = dirT.y;
             } else {
@@ -180,10 +232,10 @@ public class SupportAI {
                 out.moveY = dirT.y * 0.15f;
             }
         } else {
-
+            // Se acomoda detrás de la pelota, sobre la línea hacia el objetivo.
             kickChargeTimer = 0f;
             Vector2 stand = new Vector2(bp).mulAdd(dirT, -0.6f);
-            clampInside(stand);
+            clampInside(stand); // MK7: la posición "detrás de la pelota" puede caer fuera de la cancha
             Vector2 go = stand.sub(sp);
             float len = go.len();
             if (len > 0.05f) {
@@ -191,7 +243,7 @@ public class SupportAI {
                 out.moveX = go.x;
                 out.moveY = go.y;
             }
-
+            // Si se pasó de largo o lleva mucho acomodándose, replantea la jugada.
             stuckTimer += dt;
             if (stuckTimer > 1.4f) {
                 pending = Action.NONE;
@@ -202,6 +254,7 @@ public class SupportAI {
         stuckTimer = 0f;
     }
 
+    /** MK7: lleva el punto adentro de la cancha, a un radio de jugador de los muros. */
     private static void clampInside(Vector2 p) {
         float mx = Constants.FIELD_WIDTH / 2f - Constants.PLAYER_RADIUS - 0.05f;
         float my = Constants.FIELD_HEIGHT / 2f - Constants.PLAYER_RADIUS - 0.05f;
@@ -215,7 +268,7 @@ public class SupportAI {
         float halfH = Constants.FIELD_HEIGHT / 2f - 1f;
 
         if (goalDist < diff.aiShootRange) {
-
+            // SHOOT: al rincón más lejano del arquero, con error según dificultad.
             float keeperY = oppKeeper != null ? oppKeeper.getPosition().y : 0f;
             float corner = (keeperY >= 0f ? -1f : 1f) * (Constants.GOAL_WIDTH / 2f - 0.8f);
             corner += MathUtils.random(-1f, 1f) * diff.aiAimJitter;
@@ -223,13 +276,13 @@ public class SupportAI {
             targetCharge = MathUtils.random(0.55f, 0.9f);
             pending = Action.SHOOT;
         } else if (pressured) {
-
+            // PASS esquivando: toque fuerte-ish hacia el lado contrario del rival, ganando campo.
             float side = rp.y >= sp.y ? -1f : 1f;
             target.set(sp.x + attackSign * 7f, MathUtils.clamp(sp.y + side * 5f, -halfH, halfH));
             targetCharge = 0.45f;
             pending = Action.PASS;
         } else {
-
+            // PASS de avance: toque suave hacia el arco rival, tirando a la franja central.
             target.set(sp.x + attackSign * 6f, MathUtils.clamp(sp.y * 0.5f, -halfH, halfH));
             targetCharge = 0.28f;
             pending = Action.PASS;
@@ -239,9 +292,60 @@ public class SupportAI {
     private void trySlide(PlayerInput out, PlayerEntity self, Ball ball, PlayerEntity rival,
                           float distBall, float dt) {
         boolean rivalHasBallNearby = rival.isNear(ball) && distBall < Constants.KICK_RANGE + 0.9f;
-        if (rivalHasBallNearby && slideRetryCooldown <= 0f && MathUtils.randomBoolean(0.35f)) {
+        // MK8: con faltas activadas la IA se tira con la probabilidad de siempre solo si el planchazo toca la pelota
+        // ANTES que al rival (si pega primero en el rival es falta). Cuando el rival se interpone (lo normal: protege la
+        // pelota con el cuerpo) se arriesga muy poco, y más todavía dentro de su propia área (un penal sale caro).
+        boolean foulsOn = Settings.foulsEnabled;
+        float chance = 0.35f;
+        if (foulsOn) {
+            if (!ballWithinSlide(self, ball)) {
+                return;
+            }
+            boolean clean = slideWinsBallFirst(self, ball, rival);
+            boolean inOwnBox = Math.abs(self.getPosition().x - ownGoalX) <= Constants.PENALTY_BOX_DEPTH
+                    && Math.abs(self.getPosition().y) <= Constants.PENALTY_BOX_HEIGHT / 2f;
+            chance = clean ? (inOwnBox ? 0.10f : 0.35f) : (inOwnBox ? 0.0005f : Constants.AI_RISKY_SLIDE_CHANCE);
+        }
+        if (rivalHasBallNearby && slideRetryCooldown <= 0f && MathUtils.randomBoolean(chance)) {
             out.slidePressed = true;
             slideRetryCooldown = Constants.SLIDE_COOLDOWN + 0.5f;
         }
+    }
+
+    /** MK8: la pelota está sobre la línea del planchazo y dentro de su alcance. */
+    private static boolean ballWithinSlide(PlayerEntity self, Ball ball) {
+        Vector2 f = self.getFacing();
+        float fl = f.len();
+        if (fl < 0.0001f) {
+            return false;
+        }
+        float fx = f.x / fl, fy = f.y / fl;
+        float bx = ball.getPosition().x - self.getPosition().x, by = ball.getPosition().y - self.getPosition().y;
+        float tb = bx * fx + by * fy;
+        float pb = Math.abs(bx * fy - by * fx);
+        return tb >= 0.3f && tb <= Constants.AI_SLIDE_MAX_BALL_DIST && pb <= Constants.SLIDE_REACH;
+    }
+
+    /**
+     * MK8: ¿un planchazo hacia donde mira ahora llega a la pelota antes de llegar al rival? El planchazo va en línea
+     * recta hacia {@link PlayerEntity#getFacing()} unos 2,3 m. La pelota tiene que estar en esa línea, al alcance, y
+     * el rival o no estar en el camino o quedar detrás de la pelota.
+     */
+    private static boolean slideWinsBallFirst(PlayerEntity self, Ball ball, PlayerEntity rival) {
+        Vector2 f = self.getFacing();
+        float fl = f.len();
+        if (fl < 0.0001f) {
+            return false;
+        }
+        float fx = f.x / fl, fy = f.y / fl;
+        Vector2 sp = self.getPosition();
+        float bx = ball.getPosition().x - sp.x, by = ball.getPosition().y - sp.y;
+        float tb = bx * fx + by * fy;                       // cuánto avanza hasta la pelota
+        float rx = rival.getPosition().x - sp.x, ry = rival.getPosition().y - sp.y;
+        float tr = rx * fx + ry * fy;
+        float pr = Math.abs(rx * fy - ry * fx);
+        boolean rivalInPath = tr > 0f && tr < 3.6f && pr < Constants.FOUL_CONTACT_DIST + 0.2f;
+        // Primer contacto con la pelota a ~(tb - alcance); con el rival a ~(tr - contacto). Margen de 0,2 m.
+        return !rivalInPath || (tb - (Constants.SLIDE_REACH + Constants.BALL_RADIUS)) <= (tr - Constants.FOUL_CONTACT_DIST) - 0.2f;
     }
 }

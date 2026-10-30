@@ -8,6 +8,12 @@ import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
 
+/**
+ * Lado host (Etapa 2, paso 1): acepta UN cliente y recibe su input.
+ *
+ * Sin hilos: se llama a {@link #poll()} una vez por frame. Todavía no envía
+ * el estado del partido (eso es el paso siguiente).
+ */
 public class NetHost {
 
     private static final long CLIENT_TIMEOUT_NANOS = 3_000_000_000L;
@@ -15,7 +21,7 @@ public class NetHost {
     private DatagramChannel channel;
     private SocketAddress client;
     private long lastRecvNanos;
-    private int clientPingMs = -1;
+    private int clientPingMs = -1; // MK5: lo que el cliente dice haber medido
 
     private boolean hasSeq;
     private int lastSeq;
@@ -23,20 +29,23 @@ public class NetHost {
     private final PlayerInput scratch = new PlayerInput();
     private final ByteBuffer buf = ByteBuffer.allocate(Protocol.MAX_PACKET);
     private final ByteBuffer out = ByteBuffer.allocate(Protocol.MAX_PACKET);
-
+    // MK6: identidad propia (va en el WELCOME) y la del cliente (llega en el HELLO).
     private int localTeam = 0;
     private String localName = "";
     private Protocol.Identity clientIdentity;
 
+    /** Equipo y nombre que se le mandan al cliente. */
     public void setLocalIdentity(int team, String name) {
         localTeam = team;
         localName = name;
     }
 
+    /** Identidad del cliente conectado, o null si no hay cliente (o es una versión sin identidad). */
     public Protocol.Identity getClientIdentity() {
         return clientIdentity;
     }
 
+    /** Abre el puerto UDP. Con puerto 0 el sistema elige uno libre (útil para pruebas). */
     public void start(int port) throws IOException {
         channel = DatagramChannel.open();
         channel.configureBlocking(false);
@@ -47,6 +56,7 @@ public class NetHost {
         return ((InetSocketAddress) channel.getLocalAddress()).getPort();
     }
 
+    /** MK5: ping del cliente tal como él lo mide (-1 si todavía no hay dato). */
     public int getClientPingMs() {
         return clientPingMs;
     }
@@ -55,6 +65,7 @@ public class NetHost {
         return client != null;
     }
 
+    /** Leer todo lo que llegó desde el último frame. */
     public void poll() {
         if (channel == null) return;
         if (client != null && System.nanoTime() - lastRecvNanos > CLIENT_TIMEOUT_NANOS) {
@@ -69,7 +80,7 @@ public class NetHost {
                 handle(from);
             }
         } catch (IOException e) {
-
+            // Un paquete roto no debe tirar abajo el partido: se ignora.
         }
     }
 
@@ -78,7 +89,7 @@ public class NetHost {
         if (type < 0) return;
 
         if (type == Protocol.HELLO) {
-            Protocol.Identity id = Protocol.readIdentity(buf);
+            Protocol.Identity id = Protocol.readIdentity(buf); // antes de reusar buf para responder
             if (client == null) {
                 client = from;
                 hasSeq = false;
@@ -91,7 +102,7 @@ public class NetHost {
             if (from.equals(client)) {
                 lastRecvNanos = System.nanoTime();
                 if (id != null) clientIdentity = id;
-
+                // se repite si el WELCOME anterior se perdió
                 out.clear();
                 Protocol.writeHeader(out, Protocol.WELCOME);
                 Protocol.writeIdentity(out, localTeam, localName);
@@ -101,7 +112,7 @@ public class NetHost {
             return;
         }
 
-        if (client == null || !from.equals(client)) return;
+        if (client == null || !from.equals(client)) return; // solo se escucha al cliente aceptado
         lastRecvNanos = System.nanoTime();
 
         if (type == Protocol.BYE) {
@@ -117,7 +128,7 @@ public class NetHost {
             channel.send(out, client);
         } else if (type == Protocol.INPUT) {
             if (!Protocol.readInput(buf, scratch)) return;
-            if (hasSeq && (scratch.sequence - lastSeq) <= 0) return;
+            if (hasSeq && (scratch.sequence - lastSeq) <= 0) return; // paquete viejo o duplicado
             hasSeq = true;
             lastSeq = scratch.sequence;
             latest.sequence = scratch.sequence;
@@ -125,13 +136,18 @@ public class NetHost {
             latest.moveY = scratch.moveY;
             latest.sprint = scratch.sprint;
             latest.kickHeld = scratch.kickHeld;
-
+            // Eventos de un solo disparo: se acumulan hasta que la simulación los consuma
+            // (mismo problema que se arregló en la MK4 con el teclado).
             latest.kickReleased |= scratch.kickReleased;
             latest.switchPlayer |= scratch.switchPlayer;
             latest.slidePressed |= scratch.slidePressed;
         }
     }
 
+    /**
+     * Devuelve una copia del último input del cliente y limpia los eventos de un solo disparo.
+     * Llamar una vez por tick de simulación.
+     */
     public PlayerInput consumeInput() {
         PlayerInput copy = new PlayerInput();
         copy.sequence = latest.sequence;
@@ -146,6 +162,11 @@ public class NetHost {
         return copy;
     }
 
+    /**
+     * Copia el input del cliente sobre {@code target} (ejes y botones sostenidos se pisan; los eventos
+     * de un solo disparo se SUMAN con OR, igual que el teclado local) y limpia los eventos internos.
+     * Llamar una vez por frame: la simulación borra los eventos de {@code target} cuando los usa.
+     */
     public void drainInto(PlayerInput target) {
         target.moveX = latest.moveX;
         target.moveY = latest.moveY;
@@ -157,6 +178,7 @@ public class NetHost {
         latest.clearTransient();
     }
 
+    /** Manda el estado del partido al cliente (si hay uno conectado). */
     public void sendSnapshot(Snapshot s) {
         if (channel == null || client == null) return;
         try {

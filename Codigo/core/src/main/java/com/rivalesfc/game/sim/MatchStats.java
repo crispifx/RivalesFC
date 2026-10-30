@@ -1,5 +1,9 @@
 package com.rivalesfc.game.sim;
 
+/**
+ * Estadísticas acumuladas del partido (MK4). Índice de equipo: 0 = AZUL (izquierda), 1 = ROJO (derecha).
+ * Cada equipo tiene un jugador de campo y un arquero, así que las notas individuales salen de acá.
+ */
 public class MatchStats {
 
     public static final int FIELD_LEFT = 0;
@@ -11,7 +15,12 @@ public class MatchStats {
     public final int[] shotsOnTarget = new int[2];
     public final int[] tackles = new int[2];
     public final int[] saves = new int[2];
+    /** MK8: faltas cometidas, amarillas y rojas por equipo. */
+    public final int[] fouls = new int[2];
+    public final int[] yellows = new int[2];
+    public final int[] reds = new int[2];
 
+    /** Notas 1..10 en el orden FIELD_LEFT, KEEPER_LEFT, FIELD_RIGHT, KEEPER_RIGHT. */
     public float[] ratings(int scoreLeft, int scoreRight) {
         float[] r = new float[4];
         r[FIELD_LEFT] = fieldRating(0, scoreLeft, scoreRight);
@@ -34,6 +43,8 @@ public class MatchStats {
 
     private float fieldRating(int team, int goalsFor, int goalsAgainst) {
         float r = 5.5f + goalsFor * 1.5f + shotsOnTarget[team] * 0.3f + shots[team] * 0.15f + tackles[team] * 0.5f;
+        // MK8: las faltas y tarjetas bajan la nota (una roja pesa más que varias faltas).
+        r -= fouls[team] * 0.3f + yellows[team] * 0.5f + reds[team] * 1.5f;
         r += resultBonus(goalsFor, goalsAgainst);
         return clamp(r);
     }
