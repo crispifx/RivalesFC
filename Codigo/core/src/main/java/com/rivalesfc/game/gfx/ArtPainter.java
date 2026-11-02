@@ -57,12 +57,24 @@ public final class ArtPainter {
 
     /** Jugador de frente, 120x192. Los colores vienen como ARGB. */
     public static Bitmap person(final int jersey, final int shorts, boolean keeper) {
+        // MK9: sin variante explícita, se deduce de los colores (mismo equipo = mismo aspecto, equipos distintos = distinto).
+        int h = jersey * 31 + shorts * 17 + (keeper ? 7 : 0);
+        h ^= h >>> 15;
+        return person(jersey, shorts, keeper, Math.abs(h) % 4);
+    }
+
+    private static final float[][] SKINS = {{0.94f, 0.75f, 0.58f}, {0.80f, 0.58f, 0.40f}, {0.55f, 0.38f, 0.27f}, {0.97f, 0.82f, 0.70f}};
+    private static final float[][] HAIRS = {{0.20f, 0.12f, 0.07f}, {0.07f, 0.06f, 0.06f}, {0.86f, 0.68f, 0.30f}, {0.55f, 0.22f, 0.10f}};
+
+    /** variant 0..3: tono de piel + pelo + diseño de camiseta (0 liso, 1 rayas, 2 franjas, 3 banda). */
+    public static Bitmap person(final int jersey, final int shorts, boolean keeper, int variant) {
+        final int vi = ((variant % 4) + 4) % 4;
         SoftCanvas c = new SoftCanvas(PERSON_W, PERSON_H, 3);
         final float ow = 2.4f;
 
-        final int skin = rgb(0.94f, 0.75f, 0.58f);
+        final int skin = rgb(SKINS[vi][0], SKINS[vi][1], SKINS[vi][2]);
         final int skinD = shade(skin, 0.80f);
-        final int hair = rgb(0.20f, 0.12f, 0.07f);
+        final int hair = rgb(HAIRS[vi][0], HAIRS[vi][1], HAIRS[vi][2]);
         final int boot = rgb(0.10f, 0.10f, 0.11f);
         final int sock = keeper ? shade(shorts, 0.85f) : rgb(0.96f, 0.96f, 0.96f);
         final int glove = rgb(0.98f, 0.82f, 0.14f);
@@ -120,6 +132,18 @@ public final class ArtPainter {
         }, ow, OUTLINE);
         // franja vertical central, más clara
         c.fill(intersect(torso, roundRect(60f, 83f, 9f, 40f, 0f)), SoftCanvas.withAlpha(0xFFFFFFFF, 0.13f));
+        // diseño de camiseta
+        int band = SoftCanvas.withAlpha(0xFFFFFFFF, keeper ? 0.12f : 0.30f);
+        if (vi == 1) {            // rayas verticales
+            for (int k = -2; k <= 2; k += 2) {
+                c.fill(intersect(torso, roundRect(60f + k * 9f, 83f, 4.5f, 40f, 0f)), band);
+            }
+        } else if (vi == 2) {     // franjas horizontales
+            c.fill(intersect(torso, roundRect(60f, 80f, 40f, 4f, 0f)), band);
+            c.fill(intersect(torso, roundRect(60f, 94f, 40f, 4f, 0f)), band);
+        } else if (vi == 3) {     // banda diagonal
+            c.fill(intersect(torso, polygon(30f, 70f, 42f, 62f, 92f, 108f, 80f, 116f)), band);
+        }
         // dobladillo
         c.fill(intersect(torso, roundRect(60f, 112f, 40f, 3f, 0f)), SoftCanvas.withAlpha(0xFF000000, 0.18f));
         // cuello en V

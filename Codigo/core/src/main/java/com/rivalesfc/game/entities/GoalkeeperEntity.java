@@ -34,6 +34,9 @@ public class GoalkeeperEntity {
     /** Hacia dónde queda el interior de la cancha desde este arco: +1 (arco izquierdo) o -1 (arco derecho). */
     private final float inward;
 
+    /** MK9: cuánto se adelanta (s) a la trayectoria de un remate que viene al arco. */
+    private static final float GK_LEAD_SECONDS = 0.22f;
+
     private float trackedBallY = 0f;
 
     private boolean diving = false;
@@ -93,7 +96,15 @@ public class GoalkeeperEntity {
         visualDive = 0f;
 
         // --- TRACK ---
-        float desired = MathUtils.clamp(ballPos.y, -patrolHalfRange, patrolHalfRange);
+        // MK9: si la pelota viene hacia su arco se adelanta a donde va (un arquero que mira solo la posición actual
+        // siempre llega tarde a un remate cruzado).
+        float aim = ballPos.y;
+        float distAhead = (ballPos.x - fixedX) * inward;
+        float closing = -ballVel.x * inward;
+        if (canDive && distAhead > 0f && distAhead < Constants.GK_DIVE_TRIGGER_DIST && closing > 3f) {
+            aim += ballVel.y * Math.min(GK_LEAD_SECONDS, distAhead / closing);
+        }
+        float desired = MathUtils.clamp(aim, -patrolHalfRange, patrolHalfRange);
         float lag = MathUtils.clamp(dt / (Constants.GK_REACTION_TIME * diff.gkReactionScale), 0f, 1f);
         trackedBallY = MathUtils.lerp(trackedBallY, desired, lag);
         float diff_y = trackedBallY - body.getPosition().y;

@@ -29,6 +29,8 @@ import com.rivalesfc.game.entities.Field;
 import com.rivalesfc.game.entities.GoalkeeperEntity;
 import com.rivalesfc.game.entities.PlayerEntity;
 import com.rivalesfc.game.gfx.MotionTrail;
+import com.rivalesfc.game.gfx.NetRipple;
+import com.rivalesfc.game.gfx.Particles;
 import com.rivalesfc.game.gfx.Fonts;
 import com.rivalesfc.game.gfx.PixelArtFactory;
 import com.rivalesfc.game.input.PlayerInput;
@@ -182,6 +184,8 @@ public class MatchScreen implements Screen {
     private TextureRegion blurRegionRight = paddedRegion(texPlayerRight);
     private static final float BLUR_PAD = 0.25f;
 
+    private final NetRipple netRipple = new NetRipple(); // MK9: red que se sacude con el gol
+    private final Particles particles = new Particles(); // MK9: polvo, chispas
     private final MotionTrail trailLeft = new MotionTrail(Constants.TRAIL_MAX_POINTS);
     private final MotionTrail trailRight = new MotionTrail(Constants.TRAIL_MAX_POINTS);
 
@@ -304,6 +308,8 @@ public class MatchScreen implements Screen {
             animTime += delta;
             updateSfxAndFeedback(delta);
             updateConfetti(delta);
+            particles.update(delta);
+            netRipple.update(delta);
         }
         sendSnapshotIfDue(delta);
         if (paused || !simRuns) {
@@ -628,6 +634,8 @@ public class MatchScreen implements Screen {
         goalLog.clear();
         saveFlashTime = 0f;
         clearConfetti();
+        particles.clear();
+        netRipple.clear();
         keeperLeftWasDiving = false;
         keeperRightWasDiving = false;
         trailLeft.clear();
@@ -692,6 +700,11 @@ public class MatchScreen implements Screen {
         Float kickPower = sim.consumeKickSfxEvent();
         if (kickPower != null) {
             playSafe(kickPower > 0.55f ? sfxKickHard : sfxKickSoft, 0.55f);
+            Vector2 kv = sim.getBall().body.getLinearVelocity();
+            float kl = kv.len();
+            if (kl > 0.01f) {
+                particles.kick(rBall.x, rBall.y, kv.x / kl, kv.y / kl, kickPower);
+            }
             if (kickPower > 0.75f) {
                 triggerShake(0.15f, 0.06f);
             }
@@ -699,6 +712,7 @@ public class MatchScreen implements Screen {
         if (sim.consumeSlideTackleSfxEvent()) {
             playSafe(sfxThud, 0.6f);
             triggerShake(0.12f, 0.05f);
+            particles.dust(rBall.x, rBall.y, 0.8f);
         }
         if (sim.consumeAdvantageSfxEvent()) {
             playSafe(sfxAdvantage, 0.6f); // MK8: ventaja: aviso suave, sin silbato
@@ -713,6 +727,7 @@ public class MatchScreen implements Screen {
         if (sim.consumeSaveEvent()) {
             playSafe(sfxSave, 0.7f);
             triggerShake(0.14f, 0.05f);
+            particles.save(rBall.x, rBall.y);
             saveFlashTime = 1.3f;
         }
         boolean dl = sim.getKeeperLeft().isDiving();
@@ -735,6 +750,7 @@ public class MatchScreen implements Screen {
                 playSafe(sfxCheer, 0.8f);
                 triggerShake(0.35f, 0.12f);
                 spawnConfetti(sim.isLastGoalByLeft() ? MatchSetup.leftColor() : MatchSetup.rightColor());
+                netRipple.start(sim.isLastGoalByLeft()); // el equipo izquierdo ataca hacia X+
             } else if (phase == MatchSimulation.Phase.FULL_TIME) {
                 playSafe(sfxFullTime, 0.5f);
             } else if (phase == MatchSimulation.Phase.PLAYING && lastPhase == MatchSimulation.Phase.SET_PIECE) {
@@ -882,6 +898,7 @@ public class MatchScreen implements Screen {
 
         drawSetPieceMarker(cam);
         drawBall(cam);
+        particles.render(shapes(cam));
 
         // El rival humano se dibuja primero (con su rastro) para quedar "detrás" visualmente.
         rivalTrail.render(shapes(cam), rival.teamColor, Constants.PLAYER_RADIUS * 0.9f);
@@ -933,6 +950,7 @@ public class MatchScreen implements Screen {
         float bandH = PixelArtFactory.CROWD_BAND_HEIGHT;
         drawCrowdBand(cam, -gx, halfH + 0.60f, gx * 2f, bandH, false);
         drawCrowdBand(cam, -gx, -halfH - 0.60f - bandH, gx * 2f, bandH, true);
+        netRipple.render(shapes(cam), halfW);
     }
 
     private void drawCrowdBand(OrthographicCamera cam, float x, float y, float worldWidth, float worldHeight, boolean flipY) {

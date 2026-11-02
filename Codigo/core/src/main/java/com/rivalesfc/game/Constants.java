@@ -227,7 +227,7 @@ public final class Constants {
     /** MK8: alcance máximo (m, desde el centro del jugador) al que la IA se anima a barrer a la pelota. */
     public static final float AI_SLIDE_MAX_BALL_DIST = 2.5f;
     /** MK8: probabilidad POR TICK (30/s) con que la IA barre cuando el rival se interpone y es probable que sea falta (~15 % por encuentro). */
-    public static final float AI_RISKY_SLIDE_CHANCE = 0.010f;
+    public static final float AI_RISKY_SLIDE_CHANCE = 0.0015f;
     /** MK8: a qué distancia pasada la pelota (del lado opuesto al rival que la lleva) se acomoda la IA para tackear limpio. */
     public static final float AI_FLANK_DIST = 0.9f;
 
